@@ -9,6 +9,7 @@ export interface ComboItem {
   restSeconds: number
   transition: string
   note: string
+  transitionMode?: 'direct' | 'rest'
 }
 
 export interface ComboTemplate {

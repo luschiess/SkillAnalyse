@@ -169,8 +169,8 @@ export class SkillAnalyzer {
     const hips = midpoint(points[landmark.leftHip], points[landmark.rightHip])
     const knees = midpoint(points[landmark.leftKnee], points[landmark.rightKnee])
     const ankles = midpoint(points[landmark.leftAnkle], points[landmark.rightAnkle])
-    const kneelingCue = hips.y > shoulders.y + 0.035 && knees.y > hips.y + 0.01 && frame.kneeAngle < 145
-    const handstandCue = ankles.y < shoulders.y - 0.015 && frame.verticalDeviation < 42 && frame.elbowAngle >= 125
+    const kneelingCue = hips.y > shoulders.y + 0.015 && knees.y > hips.y - 0.04 && frame.kneeAngle < 160
+    const handstandCue = ankles.y < shoulders.y && frame.verticalDeviation < 48 && frame.elbowAngle >= 115
 
     if (this.luschiesPhase === 'waiting-for-kneeling' && kneelingCue) {
       this.luschiesPhase = 'started'
@@ -247,6 +247,13 @@ export class SkillAnalyzer {
       currentHold: this.currentHold,
       longestHold: this.longestHold,
       totalHold: this.totalHold,
+      ...(this.skill.id === LUSCHIES_SKILL_ID ? {
+        phaseLabel: this.luschiesPhase === 'waiting-for-kneeling' ? 'Waiting for kneeling pose'
+          : this.luschiesPhase === 'started' ? 'Kneeling detected · watching for rise'
+            : this.luschiesPhase === 'confirming-handstand' ? 'Handstand cue · confirming'
+              : this.luschiesPhase === 'holding' ? 'Handstand confirmed · 1 rep'
+                : 'Skill counted · 1 rep',
+      } : {}),
     }
   }
 

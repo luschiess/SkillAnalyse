@@ -159,4 +159,5 @@ export interface LiveMetrics {
   currentHold: number
   longestHold: number
   totalHold: number
+  phaseLabel?: string
 }

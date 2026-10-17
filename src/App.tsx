@@ -9,6 +9,7 @@ import type { PoseLandmarker } from '@mediapipe/tasks-vision'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { categories, getSkill, skills } from './data/skills'
 import { ComboLibrary } from './components/ComboLibrary'
+import { WorkoutPlanner } from './components/WorkoutPlanner'
 import { formatTime, SkillAnalyzer } from './lib/analyzer'
 import { ComboAnalyzer } from './lib/comboAnalyzer'
 import { FreestyleAnalyzer } from './lib/freestyleAnalyzer'
@@ -19,7 +20,7 @@ import { LUSCHIES_SKILL_ID } from './types'
 import type { AnalysisReport, ComboStep, ComboStepKind, FreestyleSegment, FreestyleSkillKind, LiveMetrics, PosePoint, Skill, TrainingSession } from './types'
 import './App.css'
 
-type Screen = 'home' | 'select' | 'skill-detail' | 'session' | 'report' | 'history'
+type Screen = 'home' | 'select' | 'skill-detail' | 'session' | 'report' | 'history' | 'plan'
 type MediaMode = 'camera' | 'upload'
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -58,6 +59,7 @@ const navItems = [
   { id: 'select' as const, label: 'Analyze skill', icon: Plus },
   { id: 'freestyle' as const, label: 'Freestyle', icon: Sparkles },
   { id: 'history' as const, label: 'Training log', icon: History },
+  { id: 'plan' as const, label: 'Training plan', icon: Dumbbell },
 ]
 const skeletonLinks = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]]
 const initialComboSteps: ComboStep[] = [
@@ -853,7 +855,7 @@ function App() {
       <main className="main-area">
         <LocalizedContent language={language}>
         <header className="topbar">
-          <div className="breadcrumb"><span>{t('TRAINING')}</span><span className="crumb-slash">/</span><strong>{t(freestyleMode && screen === 'session' ? 'Freestyle' : screen === 'home' ? 'Overview' : screen === 'select' || screen === 'skill-detail' ? 'Skill library' : screen === 'session' ? 'New analysis' : screen === 'report' ? 'Session report' : 'Training log')}</strong></div>
+          <div className="breadcrumb"><span>{t('TRAINING')}</span><span className="crumb-slash">/</span><strong>{t(freestyleMode && screen === 'session' ? 'Freestyle' : screen === 'home' ? 'Overview' : screen === 'select' || screen === 'skill-detail' ? 'Skill library' : screen === 'session' ? 'New analysis' : screen === 'report' ? 'Session report' : screen === 'plan' ? 'Training plan' : 'Training log')}</strong></div>
           <div className="topbar-actions">
             <label className="language-switch"><span>{t('Language')}</span><select aria-label={t('Select language')} value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option value="en">English</option><option value="de">Deutsch</option></select></label>
             {!appInstalled && <button className="topbar-cta install-action" onClick={() => void installApp()} aria-label={t(installPrompt ? 'Install CaliTracker' : 'Show installation instructions')}><Download size={15} /><span>{t(installPrompt ? 'Install app' : 'Install')}</span></button>}
@@ -988,7 +990,7 @@ function App() {
                   {countdown > 0 && <div className="countdown-overlay"><span>GET READY</span><strong>{countdown}</strong></div>}
                   {paused && <div className="paused-overlay"><span>RECORDING PAUSED</span></div>}
                   {recording && <div className="recording-clock"><span className="recording-dot" /> REC&nbsp; {formatTime(elapsed)}</div>}
-                  {analysisRunning && <div className="live-metric-chip">{freestyleMode ? <><span>POSE PATTERN · REPS</span><strong>{metrics.confidence < 0.45 ? 'UNCLEAR' : metrics.validReps}</strong></> : comboMode ? <><span>HSPU · HOLD</span><strong>{metrics.validReps} · {formatTime(metrics.currentHold)}</strong></> : selectedSkill.type === 'dynamic' ? <><span>REPS</span><strong>{metrics.validReps}</strong></> : <><span>HOLD</span><strong>{formatTime(metrics.currentHold)}</strong></>}</div>}
+                  {analysisRunning && <div className="live-metric-chip">{freestyleMode ? <><span>POSE PATTERN · REPS</span><strong>{metrics.confidence < 0.45 ? 'UNCLEAR' : metrics.validReps}</strong></> : comboMode ? <><span>HSPU · HOLD</span><strong>{metrics.validReps} · {formatTime(metrics.currentHold)}</strong></> : selectedSkill.id === LUSCHIES_SKILL_ID ? <><span>{t('LUSCHIESS SKILL · PHASE')}</span><strong>{metrics.phaseLabel ? t(metrics.phaseLabel) : t('Waiting for kneeling pose')} · {metrics.validReps} {t('reps')}</strong></> : selectedSkill.type === 'dynamic' ? <><span>REPS</span><strong>{metrics.validReps}</strong></> : <><span>HOLD</span><strong>{formatTime(metrics.currentHold)}</strong></>}</div>}
                 </div>
                 {analysisRunning && metrics.confidence < 0.3 && <div className="perspective-warning" role="status"><CircleAlert size={15} /><span>{freestyleMode ? 'Too few visible body landmarks for useful freestyle analysis. Improve lighting and keep your full body in frame.' : `Pose landmarks are difficult to read. Adjust lighting and framing; recommended view: ${selectedSkill.camera}`}</span></div>}
                 <div className="camera-controls">
@@ -1108,6 +1110,8 @@ function App() {
             <div className="storage-note"><ShieldCheck size={16} /><span>Local storage · {sessions.length} {sessions.length === 1 ? 'session' : 'sessions'} · Delete any session or clear all data at any time.</span></div>
           </section>
         )}
+
+        {screen === 'plan' && <WorkoutPlanner language={language} />}
 
         <footer className="app-footer"><span>CALITRACKER <i>·</i> TRAIN SMARTER, STAY GROUNDED</span><span>BUILT FOR MOVEMENT <Activity size={13} /></span></footer>
         </LocalizedContent>
