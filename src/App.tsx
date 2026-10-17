@@ -69,7 +69,7 @@ const comboKindNames: Record<ComboStepKind, string> = { press: 'Press-to-handsta
 const freestyleLabels: Array<{ kind: FreestyleSkillKind; label: string }> = [
   { kind: 'handstand', label: 'Handstand hold' },
   { kind: 'handstand-push-up', label: 'Handstand Push-up pattern' },
-  { kind: 'luschies-skill', label: 'Luschies Skill (estimated)' },
+  { kind: 'luschies-skill', label: 'Luschiess Skill (estimated)' },
   { kind: 'front-lever', label: 'Front-lever pattern' },
   { kind: 'front-lever-raise', label: 'Front-lever raise (manual)' },
   { kind: 'push-up', label: 'Push-up pattern' },

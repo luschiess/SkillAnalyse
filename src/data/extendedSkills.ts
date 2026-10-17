@@ -1,7 +1,9 @@
+import { LUSCHIES_SKILL_ID } from '../types'
 import type { AnalysisSupport, CategoryId, Skill, SkillType } from '../types'
 
 type Entry = {
   name: string
+  id?: string
   categoryName?: string
   level: number
   type: SkillType
@@ -33,7 +35,7 @@ const groups: Group[] = [
       { name: 'Handstand Shoulder Taps', level: 4, type: 'dynamic', description: 'Shift weight between hands and briefly tap the opposite shoulder while inverted.', checkpoints: ['Shift before lifting a hand', 'Keep hips controlled', 'Use a safe wall setup'], analysisSupport: 'manual', safety: ['Practice weight shifts before attempting taps', 'Use a clear landing area'] },
       { name: 'Handstand Weight Shifts', level: 3, type: 'dynamic', description: 'Move pressure gradually from one hand to the other while maintaining a supported handstand.', checkpoints: ['Keep shoulders active', 'Move slowly', 'Avoid twisting the trunk'], analysisSupport: 'partial' },
       { name: 'Handstand Press', level: 4, type: 'dynamic', description: 'A general category for controlled press-to-handstand entries from a compressed pike, tuck or straddle start.', checkpoints: ['Lift hips before extending', 'Keep the press controlled', 'Finish in a stable handstand'], analysisSupport: 'manual' },
-      { name: 'Luschies Skill', categoryName: 'Handstand / Press-to-Handstand', level: 4, type: 'dynamic', description: 'Press from a kneeling start into a handstand.', camera: 'Side view; keep the full body, hands and floor visible.', checkpoints: ['Begin from a kneeling position', 'Move upward under control', 'Finish in a handstand'], analysisSupport: 'partial' },
+      { id: LUSCHIES_SKILL_ID, name: 'Luschiess Skill', categoryName: 'Handstand / Press-to-Handstand', level: 4, type: 'dynamic', description: 'Press from a kneeling start into a handstand.', camera: 'Side view; keep the full body, hands and floor visible.', checkpoints: ['Begin from a kneeling position', 'Move upward under control', 'Finish in a handstand'], analysisSupport: 'partial' },
       { name: 'Tuck Press to Handstand', level: 4, type: 'dynamic', description: 'Lift the hips and draw the knees in as you press from a compact tuck to handstand.', checkpoints: ['Lean shoulders forward', 'Lift hips before extending', 'Finish with control'], analysisSupport: 'partial' },
       { name: 'Straddle Press to Handstand', level: 4, type: 'dynamic', description: 'Press from a wide straddle while raising the hips over the hands.', checkpoints: ['Keep knees extended', 'Elevate hips smoothly', 'Close the legs after stacking'], analysisSupport: 'partial' },
       { name: 'Pike Press to Handstand', level: 5, type: 'dynamic', description: 'Press with straight legs together from a pike position into handstand.', checkpoints: ['Maintain compression', 'Lean shoulders forward', 'Avoid kicking into the finish'], analysisSupport: 'partial' },
@@ -195,7 +197,7 @@ const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').
 export const extendedSkills: Skill[] = groups.flatMap((group) => {
   const entries = group.entries.map((entry) => ({
     ...entry,
-    id: `${group.category}-${slug(entry.name)}`,
+    id: entry.id ?? `${group.category}-${slug(entry.name)}`,
   }))
   return entries.map((entry) => {
     const easier = entries.filter((candidate) => candidate.level < entry.level).sort((a, b) => b.level - a.level)[0]

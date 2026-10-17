@@ -182,7 +182,7 @@ export class FreestyleAnalyzer {
       segments,
       reliableRepetitions: segments.reduce((sum, segment) =>
         sum + (segment.status === 'reliable' ? segment.repetitions : 0), 0),
-      note: 'Skill labels are estimates from 2D pose geometry, not validated exercise recognition. A kneeling-start to handstand pattern is labeled Luschies Skill only when a kneeling cue and subsequent upward-to-inverted landmarks are visible; this does not prove a controlled press. Camera angle, equipment, wall contact, depth and occlusion are not identified. Similar variations (for example push-up styles, muscle-ups and pull-ups) cannot be reliably distinguished by these pose landmarks.',
+      note: 'Skill labels are estimates from 2D pose geometry, not validated exercise recognition. A kneeling-start to handstand pattern is labeled Luschiess Skill only when a kneeling cue and subsequent upward-to-inverted landmarks are visible; this does not prove a controlled press. Camera angle, equipment, wall contact, depth and occlusion are not identified. Similar variations (for example push-up styles, muscle-ups and pull-ups) cannot be reliably distinguished by these pose landmarks.',
     }
   }
 
@@ -281,7 +281,7 @@ export class FreestyleAnalyzer {
       const name = kind === 'unknown'
         ? 'Unclassified movement'
         : kind === 'luschies-skill'
-        ? 'Luschies Skill'
+        ? 'Luschiess Skill'
         : kind === 'handstand-push-up'
         ? 'Handstand Push-up pattern'
         : kind === 'handstand'
