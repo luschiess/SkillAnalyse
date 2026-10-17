@@ -7,6 +7,7 @@ interface ComboSample {
   time: number
   confidence: number
   inverted: boolean
+  kneeling: boolean
   alignment: number
   elbowAngle: number
 }
@@ -15,10 +16,15 @@ const average = (values: number[]) => values.length ? values.reduce((sum, value)
 
 export class ComboAnalyzer {
   private readonly steps: ComboStep[]
+  private readonly hasLuschiesPress: boolean
   private samples: ComboSample[] = []
   private reps = 0
   private repConfidence: number[] = []
   private bending = false
+  private kneelingStartTime: number | undefined
+  private pressCandidateStart: number | undefined
+  private pressCandidateFrames = 0
+  private pressEndTime: number | undefined
   private hold = 0
   private longestHold = 0
   private previousTime: number | undefined
@@ -26,6 +32,7 @@ export class ComboAnalyzer {
 
   constructor(steps: ComboStep[]) {
     this.steps = steps
+    this.hasLuschiesPress = steps.some((step) => step.kind === 'press' && /luschie/i.test(step.name))
   }
 
   consume(points: PosePoint[] | null, time: number): LiveMetrics {
@@ -33,9 +40,28 @@ export class ComboAnalyzer {
     const frame = analyzeHandstand(points)
     const pushFrame = analyzeHandstandPushUp(points)
     const shoulder = midpoint(points[landmark.leftShoulder], points[landmark.rightShoulder])
+    const hip = midpoint(points[landmark.leftHip], points[landmark.rightHip])
+    const knees = midpoint(points[landmark.leftKnee], points[landmark.rightKnee])
     const ankle = midpoint(points[landmark.leftAnkle], points[landmark.rightAnkle])
-    const inverted = frame.confidence >= 0.3 && ankle.y < shoulder.y && frame.verticalDeviation < 42
+    const invertedDeviation = Math.abs(180 - frame.verticalDeviation)
+    const inverted = frame.confidence >= 0.3 && ankle.y < shoulder.y && invertedDeviation < 42
+    const kneeling = frame.confidence >= 0.3 &&
+      [landmark.leftShoulder, landmark.rightShoulder, landmark.leftHip, landmark.rightHip, landmark.leftKnee, landmark.rightKnee]
+        .every((index) => points[index].visibility >= 0.2) &&
+      hip.y > shoulder.y - 0.06 && knees.y > hip.y - 0.08 && frame.kneeAngle < 170
     const dt = this.previousTime === undefined ? 0 : Math.max(0, Math.min(0.5, time - this.previousTime))
+    if (this.hasLuschiesPress && this.kneelingStartTime === undefined && kneeling) this.kneelingStartTime = time
+    const pressCanStart = !this.hasLuschiesPress || this.kneelingStartTime !== undefined
+    if (pressCanStart && this.pressEndTime === undefined && inverted) {
+      this.pressCandidateStart ??= time
+      this.pressCandidateFrames += 1
+      if (this.pressCandidateFrames >= 6 && this.pressCandidateStart !== undefined && time - this.pressCandidateStart >= 0.35) {
+        this.pressEndTime = this.pressCandidateStart
+      }
+    } else if (!inverted) {
+      this.pressCandidateStart = undefined
+      this.pressCandidateFrames = 0
+    }
     const holdFrame = inverted && frame.confidence >= 0.45 && pushFrame.elbowAngle >= 125
     if (holdFrame) {
       this.hold = this.previousHoldFrame ? this.hold + dt : dt
@@ -45,8 +71,9 @@ export class ComboAnalyzer {
     }
     this.previousHoldFrame = holdFrame
     this.previousTime = time
-    if (inverted && pushFrame.elbowAngle < 110) this.bending = true
-    else if (inverted && this.bending && pushFrame.elbowAngle > 145) {
+    const afterPress = !this.hasLuschiesPress || (this.pressEndTime !== undefined && time > this.pressEndTime)
+    if (afterPress && inverted && pushFrame.elbowAngle < 110) this.bending = true
+    else if (afterPress && inverted && this.bending && pushFrame.elbowAngle > 145) {
       this.reps += 1
       this.repConfidence.push(frame.confidence)
       this.bending = false
@@ -55,6 +82,7 @@ export class ComboAnalyzer {
       time,
       confidence: frame.confidence,
       inverted,
+      kneeling,
       alignment: frame.alignment,
       elbowAngle: pushFrame.elbowAngle,
     })
@@ -100,20 +128,31 @@ export class ComboAnalyzer {
 
   comboReport(): ComboAnalysis {
     const valid = this.samples.filter((sample) => sample.confidence >= 0.45)
-    const firstInverted = valid.findIndex((sample) => sample.inverted)
-    const entryEndIndex = firstInverted < 0 ? -1 : valid.findIndex((sample, index) =>
-      index >= firstInverted && sample.inverted && valid.slice(index, index + 6).length >= 6 && valid.slice(index, index + 6).every((candidate) => candidate.inverted))
-    const entryStart = firstInverted > 0 ? valid[firstInverted - 1].time : 0
-    const entryEnd = entryEndIndex >= 0 ? valid[entryEndIndex].time : firstInverted >= 0 ? valid[firstInverted].time : 0
-    const firstBend = valid.find((sample) => sample.inverted && sample.elbowAngle < 110)
-    const lastExtended = [...valid].reverse().find((sample) => sample.inverted && sample.elbowAngle > 145)
+    const plannedHold = this.steps.some((step) => step.kind === 'hold')
+    const hasPressStep = this.steps.some((step) => step.kind === 'press')
+    const hasHspuStep = this.steps.some((step) => step.kind === 'hspu')
+    const postPressValid = this.hasLuschiesPress && this.pressEndTime !== undefined
+      ? valid.filter((sample) => sample.time >= this.pressEndTime!)
+      : valid
+    const pressValid = this.hasLuschiesPress
+      ? valid.filter((sample) => this.kneelingStartTime !== undefined && sample.time >= this.kneelingStartTime)
+      : valid
+    const firstInverted = pressValid.findIndex((sample) => sample.inverted)
+    const entryEndIndex = firstInverted < 0 ? -1 : pressValid.findIndex((sample, index) =>
+      index >= firstInverted && sample.inverted && pressValid.slice(index, index + 6).length >= 6 && pressValid.slice(index, index + 6).every((candidate) => candidate.inverted))
+    const entryStart = this.hasLuschiesPress
+      ? this.kneelingStartTime ?? 0
+      : firstInverted > 0 ? pressValid[firstInverted - 1].time : 0
+    const entryEnd = this.pressEndTime ?? (entryEndIndex >= 0 ? pressValid[entryEndIndex].time : firstInverted >= 0 ? pressValid[firstInverted].time : 0)
+    const firstBend = postPressValid.find((sample) => sample.inverted && sample.elbowAngle < 110)
+    const lastExtended = [...postPressValid].reverse().find((sample) => sample.inverted && sample.elbowAngle > 145)
     const endTime = this.samples[this.samples.length - 1]?.time ?? 0
-    const holds = valid.filter((sample) => sample.inverted && sample.elbowAngle >= 125)
+    const holds = (this.hasLuschiesPress ? postPressValid : valid).filter((sample) => sample.inverted && sample.elbowAngle >= 125)
     const holdStart = holds[0]?.time ?? entryEnd
     const holdEnd = firstBend?.time ?? holds[holds.length - 1]?.time ?? endTime
-    const hasPress = firstInverted >= 0 && entryEndIndex >= 0
-    const hasHold = holds.length >= 3
-    const hasHspu = this.reps > 0 && firstBend !== undefined
+    const hasPress = hasPressStep && firstInverted >= 0 && (this.hasLuschiesPress ? this.pressEndTime !== undefined : entryEndIndex >= 0)
+    const hasHold = plannedHold && holds.length >= 3
+    const hasHspu = hasHspuStep && this.reps > 0 && firstBend !== undefined
     const expectedKinds = this.steps.map((step) => step.kind)
     const observedKinds = [
       ...(hasPress ? [{ kind: 'press' as const, time: entryStart }] : []),

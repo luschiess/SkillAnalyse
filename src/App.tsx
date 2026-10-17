@@ -421,7 +421,7 @@ function App() {
     setAnalysisRunning(true)
     const tick = () => {
       rafRef.current = requestAnimationFrame(tick)
-      if (pausedRef.current || !landmarkerRef.current || (!analyzerRef.current && !freestyleAnalyzerRef.current) || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
+      if (pausedRef.current || !landmarkerRef.current || (!analyzerRef.current && !comboAnalyzerRef.current && !freestyleAnalyzerRef.current) || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
       if (video.currentTime === lastVideoTimeRef.current) return
       lastVideoTimeRef.current = video.currentTime
       try {
