@@ -8,6 +8,7 @@ import {
 import type { PoseLandmarker } from '@mediapipe/tasks-vision'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { categories, getSkill, skills } from './data/skills'
+import { comboTemplates } from './data/combos'
 import { ComboLibrary } from './components/ComboLibrary'
 import { WorkoutPlanner } from './components/WorkoutPlanner'
 import { formatTime, SkillAnalyzer } from './lib/analyzer'
@@ -80,6 +81,33 @@ const freestyleLabels: Array<{ kind: FreestyleSkillKind; label: string }> = [
   { kind: 'muscle-up', label: 'Muscle-up (manual)' },
   { kind: 'unknown', label: 'Unclassified / unknown' },
 ]
+const freestyleLabelOptions = [...new Set([
+  ...freestyleLabels.map((item) => item.label),
+  ...skills.map((skill) => skill.name),
+  ...comboTemplates.map((combo) => combo.name),
+])]
+const freestyleKindForLabel = (label: string): FreestyleSkillKind => {
+  const knownLabel = freestyleLabels.find((item) => item.label === label)
+  if (knownLabel) return knownLabel.kind
+  const skill = skills.find((item) => item.name === label)
+  if (!skill) return 'other-skill'
+  if (skill.name === 'Elbow Lever to Handstand') return 'elbow-lever-to-handstand'
+  if (skill.name === 'Elbow Lever') return 'elbow-lever'
+  if (skill.id === LUSCHIES_SKILL_ID) return 'luschies-skill'
+  if (skill.name === 'Front Lever Raises') return 'front-lever-raise'
+  switch (skill.category) {
+    case 'handstand':
+      return 'handstand'
+    case 'handstand-push-up':
+      return 'handstand-push-up'
+    case 'front-lever':
+      return 'front-lever'
+    case 'push-up':
+      return 'push-up'
+    default:
+      return 'other-skill'
+  }
+}
 
 function App() {
   const [language, setLanguage] = useState<Language>(() => {
@@ -752,7 +780,8 @@ function App() {
       if (segment.id !== segmentId) return segment
       const updated = { ...segment, ...changes }
       if (updated.kind === 'unknown') return { ...updated, repetitions: 0, partialRepetitions: 0, holdSeconds: 0, status: 'unclear' as const }
-      const staticKind = updated.kind === 'handstand' || updated.kind === 'front-lever'
+      const staticKind = updated.kind === 'handstand' || updated.kind === 'front-lever' ||
+        updated.kind === 'luschies-skill' || updated.kind === 'elbow-lever'
       return staticKind && (changes.kind !== undefined || changes.start !== undefined || changes.end !== undefined)
         ? { ...updated, holdSeconds: Math.max(0, updated.end - updated.start) }
         : updated
@@ -1034,7 +1063,7 @@ function App() {
               </div>
               <aside className="session-right">
                 <section className="panel setup-panel"><div className="panel-heading"><div><div className="eyebrow">{freestyleMode ? 'FREESTYLE MODE' : comboMode ? 'COMBO ORDER' : 'SESSION SETUP'}</div><h2>{freestyleMode ? 'Automatic pattern scan' : comboMode ? 'Planned sequence' : 'Make it yours'}</h2></div></div>
-                  {freestyleMode ? <><p className="freestyle-description">Freestyle starts without selecting a skill. It searches only for broad pose patterns already supported by the local model.</p>{freestylePrompt && <p className="freestyle-reference"><strong>{t('Reference sequence only')}:</strong> {t(freestylePrompt)}. {t('Freestyle does not enforce this order.')}</p>}<ul className="freestyle-support-list"><li>Handstand holds and visible HSPU elbow cycles</li><li>{t('Kneeling-start to handstand pose sequence (estimated)')}</li><li>Horizontal front-lever-like body positions</li><li>Horizontal push-up patterns and elbow cycles</li></ul><div className="disclaimer"><CircleAlert size={15} /><p>Press intent, push-up variations, wall contact, pull-ups and muscle-ups are not reliably identifiable from these landmarks alone. Unclassified periods are labeled unknown, not guessed.</p></div></>
+                  {freestyleMode ? <><p className="freestyle-description">Freestyle starts without selecting a skill or planned combo, so you can move through skills in any order. The local model estimates broad pose patterns; review and label any library skill or combo in the timeline.</p>{freestylePrompt && <p className="freestyle-reference"><strong>{t('Reference sequence only')}:</strong> {t(freestylePrompt)}. {t('Freestyle does not enforce this order.')}</p>}<ul className="freestyle-support-list"><li>Handstand holds and visible HSPU elbow cycles</li><li>{t('Kneeling-start to handstand pose sequence (estimated)')}</li><li>Elbow-lever-like support to handstand (estimated)</li><li>Horizontal front-lever-like body positions</li><li>Horizontal push-up patterns and elbow cycles</li></ul><div className="disclaimer"><CircleAlert size={15} /><p>All skill names and combo names are available for manual timeline labels; this does not make every movement automatically recognizable. Press intent, push-up variations, wall contact, pull-ups and muscle-ups are not reliably identifiable from these landmarks alone. Unclassified periods are labeled unknown, not guessed.</p></div></>
                     : comboMode ? <><p className="freestyle-reference">{comboName}</p><ol className="combo-session-order">{comboSteps.map((step) => <li key={step.id}><span>{t(comboKindNames[step.kind])}</span><strong>{step.name}</strong><small>{`${step.repetitions} rep${step.repetitions === 1 ? '' : 's'}${step.holdSeconds > 0 ? ` · ${step.holdSeconds}s hold` : ''}${step.description ? ` · ${step.description}` : ''}`}</small></li>)}</ol><div className="disclaimer"><CircleAlert size={15} /><p>{comboHasManualReview ? t('Only handstand cues are estimated automatically. Every other element is kept in the plan for manual timing and confirmation in the report.') : 'Automatic labels are estimates. The final timeline asks for confirmation where pose cues are ambiguous.'}</p></div></>
                     : <>
                   {selectedSkill.type === 'dynamic' && <div className="form-row"><label htmlFor="target-reps">Rep target</label><div className="number-control"><button onClick={() => setTargetReps(Math.max(1, targetReps - 1))} aria-label="Decrease rep target">−</button><input id="target-reps" type="number" min="1" max="50" value={targetReps} onChange={(event) => setTargetReps(Math.min(50, Math.max(1, Number(event.target.value) || 1)))} /><button onClick={() => setTargetReps(Math.min(50, targetReps + 1))} aria-label="Increase rep target">+</button></div></div>}
@@ -1084,13 +1113,14 @@ function App() {
               {activeSession.video && videoUrl && <div className="report-video panel"><div className="panel-heading"><div><div className="eyebrow">SESSION RECORDING</div><h2>Review your movement</h2></div></div><video ref={reportVideoRef} controls playsInline src={videoUrl} /></div>}
             </div>
             {activeFreestyle && <section className="combo-timeline panel freestyle-timeline"><div className="panel-heading"><div><div className="eyebrow">FREESTYLE TIMELINE · {formatTime(activeFreestyle.duration)}</div><h2>Detected patterns</h2></div><div className="freestyle-timeline-actions"><span className="combo-order-status">{activeFreestyle.framesAnalyzed < 12 ? 'Insufficient camera evidence' : `${activeFreestyle.segments.length} intervals · no overall score`}</span><button className="button-secondary" onClick={addFreestyleSegment}><Plus size={14} /> Add interval</button></div></div>
+            <datalist id="freestyle-label-options">{freestyleLabelOptions.map((label) => <option key={label} value={label} />)}</datalist>
               {activeFreestyle.framesAnalyzed < 12 && activeFreestyle.segments.length === 0 && <p className="combo-intro">The camera did not provide enough confident pose frames. The timeline is intentionally empty rather than guessing skills.</p>}
               {(activeFreestyle.framesAnalyzed >= 12 || activeFreestyle.segments.length > 0) && <><p className="combo-intro">{activeFreestyle.framesAnalyzed < 12 ? 'Only a few clear intervals were found; treat them as unconfirmed and review manually. ' : ''}{activeFreestyle.note}</p>{activeFreestyle.segments.length === 0 && <p className="combo-intro">No supported movement pattern was found in this recording. This does not mean no exercise occurred; review the video or add an interval manually.</p>}<div className="timeline-track" aria-label="Freestyle movement timeline">{activeFreestyle.segments.map((segment, index) => <button key={segment.id} className={`timeline-block ${segment.status === 'unclear' ? 'uncertain' : 'detected'} ${selectedFreestyleSegment === segment.id ? 'active' : ''}`} style={{ left: `${activeFreestyle.duration ? segment.start / activeFreestyle.duration * 100 : 0}%`, width: `${activeFreestyle.duration ? Math.max(1, (segment.end - segment.start) / activeFreestyle.duration * 100) : 1}%` }} onClick={() => { setSelectedFreestyleSegment(segment.id); if (reportVideoRef.current) reportVideoRef.current.currentTime = segment.start }} title={`${segment.name}: ${formatTime(segment.start)}–${formatTime(segment.end)}`}>{index + 1}</button>)}</div>
                 <div className="timeline-legend"><span><i className="timeline-key detected" />Pose pattern estimate</span><span><i className="timeline-key uncertain" />Unknown / uncertain</span><span>Click a segment to seek the recording</span></div>
                 <div className="timeline-segments">{activeFreestyle.segments.map((segment, index) => <div className={`timeline-segment ${selectedFreestyleSegment === segment.id ? 'selected' : ''}`} key={segment.id}>
                   <div className="timeline-segment-heading"><span>{String(index + 1).padStart(2, '0')}</span><div><strong>{segment.name}</strong><small>{segment.confirmed ? 'Manually confirmed' : `${segment.status === 'reliable' ? 'Higher-confidence pattern' : segment.status === 'unclear' ? 'Unclear pattern' : 'Estimated pattern'} · ${Math.round(segment.confidence)}% pose visibility`}</small></div><button className="button-secondary" onClick={() => { setSelectedFreestyleSegment(segment.id); if (reportVideoRef.current) reportVideoRef.current.currentTime = segment.start }}>View</button><button className="icon-button destructive" aria-label={`Remove ${segment.name} from timeline`} onClick={() => removeFreestyleSegment(segment.id)}><Trash2 size={14} /></button></div>
                   <p>{segment.feedback}{segment.alignment === null ? '' : ` Estimated alignment signal: ${segment.alignment}/100 (not a technique score).`}</p>
-                  <div className="timeline-edit"><label>Skill label<select value={segment.kind} onChange={(event) => { const kind = event.target.value as FreestyleSkillKind; const label = freestyleLabels.find((item) => item.kind === kind)?.label ?? 'Unclassified movement'; updateFreestyleSegment(segment.id, { kind, name: label, confirmed: true }) }}>{freestyleLabels.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select></label><label>Start (sec)<input type="number" min="0" max={activeFreestyle.duration} step="0.1" value={segment.start.toFixed(1)} onChange={(event) => updateFreestyleSegment(segment.id, { start: Math.min(segment.end, Math.max(0, Number(event.target.value) || 0)), confirmed: true })} /></label><label>End (sec)<input type="number" min={segment.start} max={activeFreestyle.duration} step="0.1" value={segment.end.toFixed(1)} onChange={(event) => updateFreestyleSegment(segment.id, { end: Math.min(activeFreestyle.duration, Math.max(segment.start, Number(event.target.value) || 0)), confirmed: true })} /></label>{segment.kind !== 'handstand' && segment.kind !== 'unknown' && <label>Reps<input type="number" min="0" max="99" value={segment.repetitions} onChange={(event) => updateFreestyleSegment(segment.id, { repetitions: Math.max(0, Math.min(99, Number(event.target.value) || 0)), confirmed: true })} /></label>}                  {(segment.kind === 'handstand' || segment.kind === 'front-lever' || segment.kind === 'luschies-skill') && <label>Hold (sec)<input type="number" min="0" max={activeFreestyle.duration} step="0.1" value={segment.holdSeconds.toFixed(1)} onChange={(event) => updateFreestyleSegment(segment.id, { holdSeconds: Math.max(0, Number(event.target.value) || 0), confirmed: true })} /></label>}<label className="timeline-confirm"><input type="checkbox" checked={segment.confirmed} onChange={(event) => updateFreestyleSegment(segment.id, { confirmed: event.target.checked })} /> Confirmed</label></div>
+                  <div className="timeline-edit"><label>Skill or combo label<input list="freestyle-label-options" maxLength={100} value={segment.name} onChange={(event) => { const name = event.target.value; updateFreestyleSegment(segment.id, { kind: name ? freestyleKindForLabel(name) : 'unknown', name, confirmed: true }) }} /></label><label>Start (sec)<input type="number" min="0" max={activeFreestyle.duration} step="0.1" value={segment.start.toFixed(1)} onChange={(event) => updateFreestyleSegment(segment.id, { start: Math.min(segment.end, Math.max(0, Number(event.target.value) || 0)), confirmed: true })} /></label><label>End (sec)<input type="number" min={segment.start} max={activeFreestyle.duration} step="0.1" value={segment.end.toFixed(1)} onChange={(event) => updateFreestyleSegment(segment.id, { end: Math.min(activeFreestyle.duration, Math.max(segment.start, Number(event.target.value) || 0)), confirmed: true })} /></label><label>Reps<input type="number" min="0" max="99" value={segment.repetitions} onChange={(event) => updateFreestyleSegment(segment.id, { repetitions: Math.max(0, Math.min(99, Number(event.target.value) || 0)), confirmed: true })} /></label><label>Hold (sec)<input type="number" min="0" max={activeFreestyle.duration} step="0.1" value={segment.holdSeconds.toFixed(1)} onChange={(event) => updateFreestyleSegment(segment.id, { holdSeconds: Math.max(0, Number(event.target.value) || 0), confirmed: true })} /></label><label className="timeline-confirm"><input type="checkbox" checked={segment.confirmed} onChange={(event) => updateFreestyleSegment(segment.id, { confirmed: event.target.checked })} /> Confirmed</label></div>
                   <small className="freestyle-segment-stats">{segment.repetitions ? `${segment.repetitions} repetitions · ` : ''}{segment.partialRepetitions ? `${segment.partialRepetitions} partial · ` : ''}{segment.holdSeconds > 0 ? `${formatTime(segment.holdSeconds)} estimated hold` : 'no static hold measured'}</small>
                 </div>)}</div></>}
             </section>}

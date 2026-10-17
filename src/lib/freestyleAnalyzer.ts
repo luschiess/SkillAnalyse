@@ -39,7 +39,9 @@ function classifyPose(points: PosePoint[]): FrameSample {
   const wrists = midpoint(points[landmark.leftWrist], points[landmark.rightWrist])
   const ankles = midpoint(points[landmark.leftAnkle], points[landmark.rightAnkle])
   const confidence = handstand.confidence
-  const handstandCue = confidence >= 0.45 && ankles.y < shoulder.y - 0.025 && handstand.verticalDeviation < 42
+  const handstandCue = confidence >= 0.45 &&
+    ankles.y < shoulder.y - 0.025 &&
+    Math.abs(180 - handstand.verticalDeviation) < 42
   const horizontalCue = confidence >= 0.45 && lever.frontLine < 28
   let kind: PoseKind | null = null
   let alignment = 0
@@ -87,6 +89,27 @@ const kneelingCue = (sample: FrameSample) =>
   sample.kneeY > sample.hipY + 0.01 &&
   sample.kneeAngle < 145
 
+const LUSCHIES_ENTRY_WINDOW_SECONDS = 8
+const LUSCHIES_MIN_ANKLE_RISE = 0.12
+
+function findKneelingStart(samples: FrameSample[], postureStart: number) {
+  const preceding = samples.filter((sample) =>
+    sample.time < postureStart &&
+    postureStart - sample.time <= LUSCHIES_ENTRY_WINDOW_SECONDS)
+  let cueIndex = preceding.length - 1
+  while (cueIndex >= 0 && !kneelingCue(preceding[cueIndex])) cueIndex -= 1
+  if (cueIndex < 0) return undefined
+
+  let startIndex = cueIndex
+  while (startIndex > 0) {
+    const previous = preceding[startIndex - 1]
+    const current = preceding[startIndex]
+    if (current.time - previous.time > 0.65 || !kneelingCue(previous)) break
+    startIndex -= 1
+  }
+  return preceding[startIndex]
+}
+
 function countCycles(samples: FrameSample[]) {
   let phase: 'top' | 'bottom' = 'top'
   let bottomAt: number | undefined
@@ -107,6 +130,19 @@ function countCycles(samples: FrameSample[]) {
   }
   if (phase === 'bottom' && bottomAt !== undefined && previousTime !== undefined) partialRepetitions += 1
   return { repetitions, partialRepetitions }
+}
+
+function measureHoldSeconds(samples: FrameSample[]) {
+  let seconds = 0
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1]
+    const current = samples[index]
+    const interval = current.time - previous.time
+    if (previous.elbowAngle >= 125 && current.elbowAngle >= 125 && interval > 0 && interval <= 0.65) {
+      seconds += Math.min(0.25, interval)
+    }
+  }
+  return seconds
 }
 
 export class FreestyleAnalyzer {
@@ -182,7 +218,7 @@ export class FreestyleAnalyzer {
       segments,
       reliableRepetitions: segments.reduce((sum, segment) =>
         sum + (segment.status === 'reliable' ? segment.repetitions : 0), 0),
-      note: 'Skill labels are estimates from 2D pose geometry, not validated exercise recognition. A kneeling-start to handstand pattern is labeled Luschiess Skill only when a kneeling cue and subsequent upward-to-inverted landmarks are visible; this does not prove a controlled press. Camera angle, equipment, wall contact, depth and occlusion are not identified. Similar variations (for example push-up styles, muscle-ups and pull-ups) cannot be reliably distinguished by these pose landmarks.',
+      note: 'Skill labels are estimates from 2D pose geometry, not validated exercise recognition. A kneeling-start to handstand pattern is labeled Luschiess Skill only when a kneeling cue and subsequent upward-to-inverted landmarks are visible; this does not prove a controlled press. A bent-arm horizontal support followed by a handstand may be labeled as an estimated Elbow Lever to Handstand transition, but elbow contact and similar push-up variations cannot be distinguished reliably. Camera angle, equipment, wall contact, depth and occlusion are not identified. Similar variations (for example push-up styles, muscle-ups and pull-ups) cannot be reliably distinguished by these pose landmarks.',
     }
   }
 
@@ -234,33 +270,61 @@ export class FreestyleAnalyzer {
       }
       lastKnownTime = sample.time
     }
-    return events.flatMap((event) => {
+    return events.flatMap((event, eventIndex) => {
       const samples = event.samples
       const postureStart = samples[0]?.time ?? 0
       const end = samples[samples.length - 1]?.time ?? postureStart
       const postureDuration = Math.max(0, end - postureStart)
       if (samples.length < 8 || postureDuration < 0.55) return []
-      const kneelingStart = event.kind === 'handstand'
-        ? [...this.samples].reverse().find((sample) =>
-          sample.time < postureStart && postureStart - sample.time <= 3 && kneelingCue(sample))
+      const followingHandstand = event.kind === 'push-up'
+        ? events.slice(eventIndex + 1).find((candidate) =>
+          candidate.kind === 'handstand' &&
+          candidate.samples.length >= 8 &&
+          (candidate.samples[candidate.samples.length - 1]?.time ?? 0) - (candidate.samples[0]?.time ?? 0) >= 0.55 &&
+          (candidate.samples[0]?.time ?? Infinity) - end <= 2.5)
         : undefined
-      const risesFromKneeling = kneelingStart && this.samples.some((sample) =>
+      const isElbowLeverEntry = Boolean(followingHandstand &&
+        mean(samples.map((sample) => sample.elbowAngle)) < 125)
+      if (event.kind === 'push-up' && isElbowLeverEntry) return []
+      const precedingElbowLever = event.kind === 'handstand'
+        ? [...events.slice(0, eventIndex)].reverse().find((candidate) =>
+          candidate.kind === 'push-up' &&
+          postureStart - (candidate.samples[candidate.samples.length - 1]?.time ?? -Infinity) <= 2.5 &&
+          mean(candidate.samples.map((sample) => sample.elbowAngle)) < 125)
+        : undefined
+      const isElbowLeverTransition = Boolean(precedingElbowLever)
+      const kneelingStart = event.kind === 'handstand'
+        ? findKneelingStart(this.samples, postureStart)
+        : undefined
+      const startsRising = kneelingStart && this.samples.some((sample) =>
         sample.time > kneelingStart.time && sample.time < postureStart &&
         sample.confidence >= 0.45 &&
         (sample.hipY < kneelingStart.hipY - 0.06 || sample.ankleY < kneelingStart.ankleY - 0.06))
-      const isLuschiesSkill = Boolean(kneelingStart && risesFromKneeling)
-      const start = isLuschiesSkill && kneelingStart ? kneelingStart.time : postureStart
+      const reachesHandstand = kneelingStart &&
+        kneelingStart.ankleY - mean(samples.map((sample) => sample.ankleY)) >= LUSCHIES_MIN_ANKLE_RISE
+      const isLuschiesSkill = Boolean(kneelingStart && startsRising && reachesHandstand)
+      const start = isElbowLeverTransition && precedingElbowLever
+        ? precedingElbowLever.samples[0]?.time ?? postureStart
+        : isLuschiesSkill && kneelingStart ? kneelingStart.time : postureStart
       const duration = Math.max(0, end - start)
       const meanConfidence = mean([
         ...samples.map((sample) => sample.confidence),
+        ...(isElbowLeverTransition && precedingElbowLever ? precedingElbowLever.samples.map((sample) => sample.confidence) : []),
         ...(isLuschiesSkill && kneelingStart ? [kneelingStart.confidence] : []),
       ])
-      const alignment = mean(samples.map((sample) => sample.alignment))
+      const alignment = mean([
+        ...samples.map((sample) => sample.alignment),
+        ...(isElbowLeverTransition && precedingElbowLever ? precedingElbowLever.samples.map((sample) => sample.alignment) : []),
+      ])
       const cycles = event.kind === 'handstand' || event.kind === 'push-up' ? countCycles(samples) : { repetitions: 0, partialRepetitions: 0 }
-      const holdSeconds = cycles.repetitions > 0 || event.kind === 'unknown' || event.kind === 'push-up' ? 0 : duration
+      const holdSeconds = event.kind === 'unknown' || event.kind === 'push-up'
+        ? 0
+        : measureHoldSeconds(samples)
       const kind: PoseKind = isLuschiesSkill
         ? 'luschies-skill'
-        : event.kind === 'handstand' && cycles.repetitions > 0
+        : isElbowLeverTransition
+        ? 'elbow-lever-to-handstand'
+        : event.kind === 'handstand' && (cycles.repetitions > 0 || cycles.partialRepetitions > 0)
         ? 'handstand-push-up'
         : event.kind
       if (kind === 'unknown' && duration < 1.5) return []
@@ -282,6 +346,8 @@ export class FreestyleAnalyzer {
         ? 'Unclassified movement'
         : kind === 'luschies-skill'
         ? 'Luschiess Skill'
+        : kind === 'elbow-lever-to-handstand'
+        ? 'Elbow Lever to Handstand (estimated)'
         : kind === 'handstand-push-up'
         ? 'Handstand Push-up pattern'
         : kind === 'handstand'
@@ -291,6 +357,8 @@ export class FreestyleAnalyzer {
             : 'Push-up pattern'
       const feedback = kind === 'unknown'
         ? 'Pose landmarks were visible, but no supported movement pattern matched this interval. Choose a label only after checking the video.'
+        : kind === 'elbow-lever-to-handstand'
+        ? 'A bent-arm horizontal support followed by an inverted position was visible. 2D landmarks cannot confirm elbow-lever contact or distinguish every push-up-to-handstand variation.'
         : alignment < 60
         ? 'Alignment varied in the visible 2D landmarks; perspective can affect this estimate.'
         : alignment < 78
@@ -302,9 +370,9 @@ export class FreestyleAnalyzer {
         name,
         start,
         end,
-        repetitions: cycles.repetitions,
+        repetitions: isElbowLeverTransition ? Math.max(1, cycles.repetitions) : cycles.repetitions,
         partialRepetitions: cycles.partialRepetitions,
-        holdSeconds: kind === 'luschies-skill' ? postureDuration : holdSeconds,
+        holdSeconds,
         confidence: Math.round(meanConfidence * 100),
         status,
         alignment: Math.round(alignment),
