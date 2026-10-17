@@ -2,7 +2,7 @@ import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
 import type { PosePoint } from '../types'
 
 const assetUrl = (path: string) => new URL(`${import.meta.env.BASE_URL}${path}`, document.baseURI).href
-const wasmRoot = assetUrl('mediapipe/wasm/')
+const wasmRoot = assetUrl('mediapipe/wasm')
 const modelUrl = assetUrl('models/pose_landmarker_lite.task')
 let landmarkerPromise: Promise<PoseLandmarker> | undefined
 

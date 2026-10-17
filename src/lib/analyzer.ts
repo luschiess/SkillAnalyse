@@ -1,6 +1,6 @@
 import { LUSCHIES_SKILL_ID } from '../types'
 import type { AnalysisReport, LiveMetrics, PosePoint, Skill } from '../types'
-import { landmark, midpoint } from './analyzers/common'
+import { bodyLine, landmark, midpoint } from './analyzers/common'
 import { analyzeSkillFrame } from './analyzers'
 
 const avg = (values: number[]) => values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0
@@ -32,7 +32,7 @@ export class SkillAnalyzer {
   private countedLeftWrist: number | undefined
   private countedRightWrist: number | undefined
   private smoothedAlignment: number | undefined
-  private luschiesPhase: 'waiting-for-kneeling' | 'started' | 'confirming-handstand' | 'holding' | 'complete' = 'waiting-for-kneeling'
+  private luschiesPhase: 'waiting-for-kneeling' | 'started' | 'confirming-handstand' | 'holding' = 'waiting-for-kneeling'
   private luschiesStartTime: number | undefined
   private luschiesTransitionTime: number | undefined
   private luschiesHandstandTime: number | undefined
@@ -55,7 +55,7 @@ export class SkillAnalyzer {
   consume(points: PosePoint[] | null, time: number): LiveMetrics {
     if (!points || points.length <= landmark.rightAnkle) {
       if (this.skill.id === LUSCHIES_SKILL_ID) {
-        if (this.luschiesPhase === 'holding') this.luschiesPhase = 'complete'
+        if (this.luschiesPhase === 'holding') this.luschiesPhase = 'waiting-for-kneeling'
         if (this.luschiesPhase === 'confirming-handstand') this.resetLuschiesCandidate()
         this.currentHold = 0
         this.previousTime = time
@@ -64,20 +64,18 @@ export class SkillAnalyzer {
     }
     const frame = analyzeSkillFrame(this.skill, points)
     const { confidence, alignment, symmetry, jointExtension, kneeAngle } = frame
-    if (confidence < 0.3) {
+    if (confidence < 0.3 && this.skill.id !== LUSCHIES_SKILL_ID) {
       this.currentHold = 0
-      if (this.skill.id === LUSCHIES_SKILL_ID) {
-        if (this.luschiesPhase === 'holding') this.luschiesPhase = 'complete'
-        if (this.luschiesPhase === 'confirming-handstand') this.resetLuschiesCandidate()
-      }
       this.previousTime = time
       return this.live(confidence)
     }
-    this.smoothedAlignment = this.smoothedAlignment === undefined
-      ? alignment
-      : this.smoothedAlignment * (this.settings.smoothingStrength / 100) + alignment * (1 - this.settings.smoothingStrength / 100)
+    if (confidence >= 0.3) {
+      this.smoothedAlignment = this.smoothedAlignment === undefined
+        ? alignment
+        : this.smoothedAlignment * (this.settings.smoothingStrength / 100) + alignment * (1 - this.settings.smoothingStrength / 100)
+    }
     const sample: Sample = { time, confidence, alignment, symmetry, jointExtension, elbowAngle: frame.elbowAngle }
-    this.samples.push(sample)
+    if (confidence >= 0.3) this.samples.push(sample)
 
     const dt = this.previousTime === undefined ? 0 : Math.max(0, Math.min(0.5, time - this.previousTime))
     this.previousTime = time
@@ -164,17 +162,25 @@ export class SkillAnalyzer {
   }
 
   private updateLuschiesSkill(points: PosePoint[], time: number, frame: ReturnType<typeof analyzeSkillFrame>, dt: number) {
-    if (frame.confidence < 0.45 || this.luschiesPhase === 'complete') return
+    const visible = (indices: number[]) => indices.every((index) => points[index].visibility >= 0.2)
+    const p = landmark
+    const kneelingVisible = visible([p.leftShoulder, p.rightShoulder, p.leftHip, p.rightHip, p.leftKnee, p.rightKnee])
+    const handstandVisible = visible([p.leftShoulder, p.rightShoulder, p.leftElbow, p.rightElbow, p.leftWrist, p.rightWrist, p.leftAnkle, p.rightAnkle])
     const shoulders = midpoint(points[landmark.leftShoulder], points[landmark.rightShoulder])
     const hips = midpoint(points[landmark.leftHip], points[landmark.rightHip])
     const knees = midpoint(points[landmark.leftKnee], points[landmark.rightKnee])
     const ankles = midpoint(points[landmark.leftAnkle], points[landmark.rightAnkle])
-    const kneelingCue = hips.y > shoulders.y + 0.015 && knees.y > hips.y - 0.04 && frame.kneeAngle < 160
-    const handstandCue = ankles.y < shoulders.y && frame.verticalDeviation < 48 && frame.elbowAngle >= 115
+    const body = bodyLine(points)
+    const invertedDeviation = Math.abs(180 - body.verticalDeviation)
+    const invertedAlignment = clamp(
+      100 - Math.max(0, invertedDeviation - 8) * 2.4 - Math.max(0, body.hipOffset - 0.025) * 500,
+    )
+    const kneelingCue = kneelingVisible && hips.y > shoulders.y - 0.06 && knees.y > hips.y - 0.08 && frame.kneeAngle < 170
+    const handstandCue = handstandVisible && ankles.y < shoulders.y - 0.025 && invertedDeviation < 55 && frame.elbowAngle >= 100
 
     if (this.luschiesPhase === 'waiting-for-kneeling' && kneelingCue) {
       this.luschiesPhase = 'started'
-      this.luschiesStartTime = time
+      this.luschiesStartTime ??= time
       this.luschiesStartHipY = hips.y
       this.luschiesStartAnkleY = ankles.y
       return
@@ -189,7 +195,7 @@ export class SkillAnalyzer {
         this.luschiesCandidateStart = time
         this.luschiesCandidateFrames = 1
         this.luschiesCandidateConfidence = [frame.confidence]
-        this.luschiesCandidateAlignments = [frame.alignment]
+        this.luschiesCandidateAlignments = [invertedAlignment]
         return
       }
     }
@@ -200,11 +206,11 @@ export class SkillAnalyzer {
       }
       this.luschiesCandidateFrames += 1
       this.luschiesCandidateConfidence.push(frame.confidence)
-      this.luschiesCandidateAlignments.push(frame.alignment)
+      this.luschiesCandidateAlignments.push(invertedAlignment)
       if (this.luschiesCandidateFrames >= 6 && this.luschiesCandidateStart !== undefined && time - this.luschiesCandidateStart >= 0.35) {
         this.luschiesPhase = 'holding'
-        this.luschiesHandstandTime = this.luschiesCandidateStart
-        this.validReps = 1
+        this.luschiesHandstandTime ??= this.luschiesCandidateStart
+        this.validReps += 1
         this.repConfidence.push(avg(this.luschiesCandidateConfidence))
         this.luschiesHoldAlignments.push(...this.luschiesCandidateAlignments)
         const confirmedHold = Math.max(0, time - this.luschiesCandidateStart)
@@ -218,7 +224,7 @@ export class SkillAnalyzer {
     }
     if (this.luschiesPhase === 'holding') {
       if (!handstandCue) {
-        this.luschiesPhase = 'complete'
+        this.luschiesPhase = 'waiting-for-kneeling'
         this.currentHold = 0
         return
       }
@@ -227,7 +233,7 @@ export class SkillAnalyzer {
         this.totalHold += dt
         this.longestHold = Math.max(this.longestHold, this.currentHold)
       }
-      this.luschiesHoldAlignments.push(frame.alignment)
+      this.luschiesHoldAlignments.push(invertedAlignment)
     }
   }
 
@@ -251,8 +257,7 @@ export class SkillAnalyzer {
         phaseLabel: this.luschiesPhase === 'waiting-for-kneeling' ? 'Waiting for kneeling pose'
           : this.luschiesPhase === 'started' ? 'Kneeling detected · watching for rise'
             : this.luschiesPhase === 'confirming-handstand' ? 'Handstand cue · confirming'
-              : this.luschiesPhase === 'holding' ? 'Handstand confirmed · 1 rep'
-                : 'Skill counted · 1 rep',
+              : 'Handstand confirmed',
       } : {}),
     }
   }
@@ -418,8 +423,8 @@ export class SkillAnalyzer {
       confidence: Math.round(confidence * 100),
       insufficientConfidence: !enoughEvidence,
       framesAnalyzed: this.samples.length,
-      validReps: entryDetected ? 1 : 0,
-      partialReps: startDetected && !entryDetected ? 1 : 0,
+      validReps: this.validReps,
+      partialReps: this.luschiesPhase === 'started' || this.luschiesPhase === 'confirming-handstand' ? 1 : 0,
       longestHold: this.longestHold,
       totalHold: this.totalHold,
       repConfidence: this.repConfidence,
