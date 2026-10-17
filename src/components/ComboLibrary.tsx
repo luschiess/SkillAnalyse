@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowRight, ArrowUp, Check, Copy, GripVertical, Plus, Save, Search, Trash2, Undo2, X } from 'lucide-react'
+import { Activity, ArrowDown, ArrowRight, ArrowUp, Check, Copy, GripVertical, Plus, Save, Search, Trash2, Undo2, X } from 'lucide-react'
 import { comboTemplates, type ComboItem } from '../data/combos'
 import { skills } from '../data/skills'
-import type { CategoryId, Skill, SkillType } from '../types'
+import { LUSCHIES_SKILL_ID } from '../types'
+import type { CategoryId, ComboStep, ComboStepKind, Skill, SkillType } from '../types'
 import { translate, type Language } from '../lib/language'
 
 interface UserCombo {
@@ -97,7 +98,11 @@ const categories: Array<{ id: CategoryId | 'all'; label: string }> = [
   { id: 'dynamic-skills', label: 'Other skills' },
 ]
 
-export function ComboLibrary({ language, onFreestyle }: { language: Language; onFreestyle: (name: string) => void }) {
+export function ComboLibrary({ language, onFreestyle, onAnalyzeCombo }: {
+  language: Language
+  onFreestyle: (name: string) => void
+  onAnalyzeCombo: (name: string, steps: ComboStep[]) => void
+}) {
   const t = useCallback((value: string) => translate(value, language), [language])
   const [saved, setSaved] = useState<UserCombo[]>(loadCombos)
   const [customSkills, setCustomSkills] = useState<CustomComboSkill[]>(loadCustomSkills)
@@ -128,6 +133,36 @@ export function ComboLibrary({ language, onFreestyle }: { language: Language; on
   const isDirty = baseDraft !== JSON.stringify({ name, difficulty: draftDifficulty, steps })
   const hasRestTransition = (step: ComboItem) =>
     step.transitionMode === 'rest' || (step.transitionMode === undefined && step.restSeconds > 0)
+  const toCameraSteps = (comboName: string, comboItems: ComboItem[]) => {
+    const cameraSteps: ComboStep[] = []
+    for (const item of comboItems) {
+      const skill = allSkills.find((candidate) => candidate.id === item.skillId)
+      if (!skill) {
+        setError(t('A skill in this combo is no longer available.'))
+        return
+      }
+      const kind: ComboStepKind = skill.id === LUSCHIES_SKILL_ID || skill.category === 'bent-arm-press'
+        ? 'press'
+        : skill.category === 'handstand-push-up'
+          ? 'hspu'
+          : skill.category === 'handstand' && skill.type !== 'dynamic'
+            ? 'hold'
+            : 'manual'
+      cameraSteps.push({
+        id: item.id,
+        kind,
+        name: skill.name,
+        repetitions: item.repetitions,
+        holdSeconds: item.holdSeconds,
+        description: [
+          item.transition,
+          item.note,
+          item.transitionMode === 'rest' && item.restSeconds > 0 ? `${item.restSeconds}s rest` : '',
+        ].filter(Boolean).join(' · '),
+      })
+    }
+    onAnalyzeCombo(comboName, cameraSteps)
+  }
 
   const visibleTemplates = useMemo(() => comboTemplates.filter((combo) =>
     (difficulty === 'all' || combo.difficulty === Number(difficulty)) &&
@@ -176,6 +211,7 @@ export function ComboLibrary({ language, onFreestyle }: { language: Language; on
     if (next === steps) return
     setUndoStack((history) => [...history.slice(-19), steps])
     setSteps(next)
+    setError('')
   }
 
   const updateStep = (stepId: string, changes: Partial<ComboItem>) =>
@@ -205,16 +241,24 @@ export function ComboLibrary({ language, onFreestyle }: { language: Language; on
     loadDraft(template.name, template.difficulty, template.steps.map((step) => ({ ...step, id: crypto.randomUUID() })), null)
   }
 
-  const save = () => {
+  const save = (): UserCombo | null => {
     const trimmedName = name.trim()
-    if (!trimmedName || steps.length === 0 || steps.some((step) =>
+    if (!trimmedName) {
+      setError(t('Give the combo a name.'))
+      return null
+    }
+    if (steps.length === 0) {
+      setError(t('Add at least one skill to your combo.'))
+      return null
+    }
+    if (steps.some((step) =>
       !allSkills.some((skill) => skill.id === step.skillId) ||
       !Number.isInteger(step.repetitions) || step.repetitions < 1 ||
       !Number.isInteger(step.holdSeconds) || step.holdSeconds < 0 ||
       !Number.isInteger(step.restSeconds) || step.restSeconds < 0,
     )) {
-      setError(t('Give the combo a name and add at least one skill.'))
-      return
+      setError(t('Check the combo step settings and try again.'))
+      return null
     }
     const id = editingId ?? crypto.randomUUID()
     const next = { id, name: trimmedName, difficulty: draftDifficulty, steps: steps.map((step) => ({ ...step })) }
@@ -225,7 +269,14 @@ export function ComboLibrary({ language, onFreestyle }: { language: Language; on
       setEditingId(id)
       setBaseDraft(JSON.stringify({ name: trimmedName, difficulty: draftDifficulty, steps }))
       setError('')
+      return next
     }
+    return null
+  }
+
+  const saveAndAnalyze = () => {
+    const combo = save()
+    if (combo) toCameraSteps(combo.name, combo.steps)
   }
 
   const duplicate = (combo: UserCombo) => {
@@ -327,7 +378,7 @@ export function ComboLibrary({ language, onFreestyle }: { language: Language; on
     setCreateSkillOpen(true)
   }
 
-  const testSavedCombo = (combo: UserCombo) => {
+  const testSavedCombo = (combo: Pick<UserCombo, 'id' | 'name' | 'difficulty' | 'steps'>) => {
     if (!combo.steps.length) return
     setPreviewSource(combo)
     setPreviewStep(0)
@@ -376,7 +427,7 @@ export function ComboLibrary({ language, onFreestyle }: { language: Language; on
 
       <section className={`combo-draft combo-draft-editor ${builderTab === 'steps' ? 'mobile-active' : ''}`}>
         <div className="combo-builder-section-heading"><div><span className="eyebrow">{t('STEP 2 · ARRANGE & CONFIGURE')}</span><h3>{editingId ? t('Edit saved combo') : t('Your combo')}</h3></div></div>
-        <div className="combo-draft-meta"><label className="combo-name-field">{t('Combo name')}<input value={name} maxLength={70} onChange={(event) => setName(event.target.value)} placeholder={t('Name your sequence')} /></label><label>{t('Difficulty')}<select value={draftDifficulty} onChange={(event) => setDraftDifficulty(Number(event.target.value))}>{[1, 2, 3, 4, 5].map((level) => <option value={level} key={level}>{t('Level')} {level}</option>)}</select></label></div>
+        <div className="combo-draft-meta"><label className="combo-name-field">{t('Combo name')}<input value={name} maxLength={70} required aria-required="true" onChange={(event) => { setName(event.target.value); setError('') }} placeholder={t('Name your sequence')} /></label><label>{t('Difficulty')}<select value={draftDifficulty} onChange={(event) => setDraftDifficulty(Number(event.target.value))}>{[1, 2, 3, 4, 5].map((level) => <option value={level} key={level}>{t('Level')} {level}</option>)}</select></label></div>
         <div className="combo-draft-tools"><span>{steps.length} {t('steps')} · ~{formattedEstimate}</span><button className="button-secondary" disabled={!undoStack.length} onClick={() => { const previous = undoStack[undoStack.length - 1]; setSteps(previous); setUndoStack((history) => history.slice(0, -1)) }}><Undo2 size={15} /> {t('Undo')}</button><button className="button-secondary destructive-text" disabled={!steps.length} onClick={clearSteps}><Trash2 size={14} /> {t('Remove all steps')}</button></div>
         <div className="combo-step-list">
           {steps.map((step, index) => {
@@ -401,7 +452,7 @@ export function ComboLibrary({ language, onFreestyle }: { language: Language; on
           })}
           {steps.length === 0 && <div className="combo-empty-steps"><strong>{t('Your combo is empty')}</strong><span>{t('Search the skill library and tap Add to begin.')}</span><button className="button-secondary" onClick={() => setBuilderTab('skills')}><Search size={15} /> {t('Browse skills')}</button></div>}
         </div>
-        <div className="combo-editor-footer"><button className="button-secondary" disabled={!steps.length} onClick={() => { setPreviewSource(null); setPreviewStep(0) }}><Check size={15} /> {t('Test combo')}</button><button className="button-primary" onClick={save} disabled={!name.trim() || !steps.length}><Save size={15} /> {t('Save combo')}</button></div>
+        <div className="combo-editor-footer"><button className="button-secondary" disabled={!steps.length} onClick={() => { setPreviewSource(null); setPreviewStep(0) }}><Check size={15} /> {t('Test combo')}</button><button className="button-secondary" onClick={save}><Save size={15} /> {t('Save combo')}</button><button className="button-primary" onClick={saveAndAnalyze}><Activity size={15} /> {t('Save & analyze with camera')}</button></div>
         {error && <p className="combo-save-error" role="alert">{error}</p>}
         <div className="combo-preview combo-builder-preview"><strong>{t('Full combo preview')}</strong>{steps.length ? <ol>{steps.map((step, index) => <li key={step.id}><span>{index + 1}.</span><strong>{t(allSkills.find((skill) => skill.id === step.skillId)?.name ?? 'Unknown skill')}</strong><small>{formatStepTime(step, index, steps.length)}{step.note ? ` · ${step.note}` : ''}</small></li>)}</ol> : <p>{t('Add a skill to preview the sequence.')}</p>}</div>
       </section>
@@ -428,13 +479,13 @@ export function ComboLibrary({ language, onFreestyle }: { language: Language; on
         <div className="combo-template-head"><span className="combo-difficulty">{t('Level')} {template.difficulty}</span><span>{t(template.category)}</span></div><h3>{t(template.name)}</h3><p>{t(template.description)}</p>
         <ol>{template.steps.map((step) => <li key={step.id}>{t(allSkills.find((skill) => skill.id === step.skillId)?.name ?? '')}{step.repetitions > 1 ? ` · ${step.repetitions} ${t('reps')}` : ''}{step.holdSeconds > 0 ? ` · ${step.holdSeconds}s` : ''}</li>)}</ol>
         <small><strong>{t('Prerequisites')}:</strong> {template.prerequisites.map(t).join(' · ')}</small>
-        <div className="combo-template-actions"><button className="button-secondary" onClick={() => loadTemplate(template.id)}><ArrowDown size={14} /> {t('Copy to builder')}</button><button className="text-button" onClick={() => setComparisonId(comparisonId === template.id ? '' : template.id)}>{comparisonId === template.id ? t('Hide comparison') : t('Compare')}</button><button className="text-button" onClick={() => onFreestyle(template.name)}>{t('Use as freestyle reference')} <ArrowRight size={14} /></button></div>
+        <div className="combo-template-actions"><button className="button-primary" onClick={() => toCameraSteps(template.name, template.steps)}><Activity size={14} /> {t('Analyze with camera')}</button><button className="button-secondary" onClick={() => loadTemplate(template.id)}><ArrowDown size={14} /> {t('Copy to builder')}</button><button className="text-button" onClick={() => setComparisonId(comparisonId === template.id ? '' : template.id)}>{comparisonId === template.id ? t('Hide comparison') : t('Compare')}</button><button className="text-button" onClick={() => onFreestyle(template.name)}>{t('Use as freestyle reference')} <ArrowRight size={14} /></button></div>
       </article>)}</div>
       {comparison && <div className="combo-comparison panel"><strong>{t('Reference sequence')}: {t(comparison.name)}</strong><ol>{comparison.steps.map((step) => <li key={step.id}>{t(allSkills.find((skill) => skill.id === step.skillId)?.name ?? '')}</li>)}</ol><p>{t('Compare the reference with your current draft below; this is a planning aid, not a movement assessment.')}</p></div>}
     </section>
 
     <div className="saved-combo-list"><div className="combo-builder-section-heading"><div><span className="eyebrow">{t('SAVED LOCALLY')}</span><h3>{t('Saved combos')} · {saved.length}</h3></div></div>
-      {visibleSaved.map((combo) => <div className="saved-combo-row panel" key={combo.id}><div><strong>{t(combo.name)} · {t('Level')} {combo.difficulty}</strong><small>· {combo.steps.length} {t('steps')} · {combo.steps.map((step) => t(allSkills.find((skill) => skill.id === step.skillId)?.name ?? 'Unknown skill')).join(' → ')}</small></div><div><button className="text-button" onClick={() => edit(combo)}>{t('Open / rename')}</button><button className="text-button" onClick={() => duplicate(combo)}><Copy size={13} /> {t('Duplicate')}</button><button className="text-button destructive-text" onClick={() => remove(combo)}><Trash2 size={13} /> {t('Delete')}</button><button className="text-button" onClick={() => testSavedCombo(combo)}>{t('Test combo')}</button><button className="text-button" onClick={() => onFreestyle(combo.name)}>{t('Freestyle')}</button></div></div>)}
+      {visibleSaved.map((combo) => <div className="saved-combo-row panel" key={combo.id}><div><strong>{t(combo.name)} · {t('Level')} {combo.difficulty}</strong><small>· {combo.steps.length} {t('steps')} · {combo.steps.map((step) => t(allSkills.find((skill) => skill.id === step.skillId)?.name ?? 'Unknown skill')).join(' → ')}</small></div><div><button className="text-button" onClick={() => edit(combo)}>{t('Open / rename')}</button><button className="text-button" onClick={() => duplicate(combo)}><Copy size={13} /> {t('Duplicate')}</button><button className="text-button destructive-text" onClick={() => remove(combo)}><Trash2 size={13} /> {t('Delete')}</button><button className="text-button" onClick={() => testSavedCombo(combo)}>{t('Test combo')}</button><button className="text-button" onClick={() => toCameraSteps(combo.name, combo.steps)}>{t('Analyze with camera')}</button><button className="text-button" onClick={() => onFreestyle(combo.name)}>{t('Freestyle')}</button></div></div>)}
       {visibleSaved.length === 0 && saved.length > 0 && <p className="muted-text">{t('No saved combos match this search.')}</p>}
     </div>
   </section>

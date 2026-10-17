@@ -68,10 +68,10 @@ export class ComboAnalyzer {
     const enoughEvidence = observed.length >= 12 && confidence >= 0.45
     const combo = this.comboReport()
     const criteria = [
-      { name: 'Handstand alignment', score: Math.round(alignment), detail: 'Estimated from visible 2D shoulder, hip and ankle landmarks during inverted frames.' },
-      { name: 'Hold stability', score: Math.round(alignment), detail: 'A rough alignment estimate; balance, depth and support contact are not verified.' },
-      { name: 'HSPU movement phases', score: Math.round(this.reps ? 70 : 0), detail: 'Counts require visible elbow flexion and extension while an inverted posture is tracked.' },
-      { name: 'Requested sequence', score: combo.sequenceFollowed === true ? 75 : 0, detail: 'Sequence matching uses pose cues and should be checked against the recording.' },
+      { name: 'Visible handstand alignment cue', score: Math.round(alignment), detail: 'Estimated from visible 2D shoulder, hip and ankle landmarks during inverted frames; this does not identify other skills.' },
+      { name: 'Visible inverted hold cue', score: Math.round(alignment), detail: 'A rough alignment estimate; balance, depth, support contact and non-handstand holds are not verified.' },
+      { name: 'Inverted elbow movement cue', score: Math.round(this.reps ? 70 : 0), detail: 'Counts require visible elbow flexion and extension while an inverted posture is tracked; they do not count pull-ups or other non-inverted skills.' },
+      { name: 'Observable sequence cues', score: combo.sequenceFollowed === true ? 75 : 0, detail: 'Only handstand press, hold and inverted elbow cues can be compared automatically; other steps require manual timing and review.' },
     ]
     const issues = combo.segments.filter((segment) => !segment.detected || !segment.confirmed).map((segment) =>
       `${segment.name}: ${segment.feedback}`)
@@ -122,16 +122,18 @@ export class ComboAnalyzer {
     ].sort((left, right) => left.time - right.time).map((event) => event.kind)
     let lastBoundary = 0
     const segments: ComboSegment[] = this.steps.map((step) => {
-      const detected = step.kind === 'press' ? hasPress : step.kind === 'hold' ? hasHold : hasHspu
-      const start = step.kind === 'press' ? entryStart : step.kind === 'hold' ? Math.max(entryEnd, holdStart) : firstBend?.time ?? endTime
-      const end = step.kind === 'press' ? entryEnd : step.kind === 'hold' ? Math.max(start, holdEnd) : Math.max(start, lastExtended?.time ?? endTime)
+      const detected = step.kind === 'press' ? hasPress : step.kind === 'hold' ? hasHold : step.kind === 'hspu' ? hasHspu : false
+      const start = step.kind === 'press' ? entryStart : step.kind === 'hold' ? Math.max(entryEnd, holdStart) : step.kind === 'hspu' ? firstBend?.time ?? endTime : lastBoundary
+      const end = step.kind === 'press' ? entryEnd : step.kind === 'hold' ? Math.max(start, holdEnd) : step.kind === 'hspu' ? Math.max(start, lastExtended?.time ?? endTime) : start
       const boundedStart = Math.max(lastBoundary, Math.min(endTime, start))
       const boundedEnd = Math.max(boundedStart, Math.min(endTime, end))
       lastBoundary = boundedEnd
       const confidence: ComboSegment['confidence'] = detected ? 'estimated' : 'unconfirmed'
       const duration = Math.max(0, boundedEnd - boundedStart)
       const feedback = !detected
-          ? 'Pose cues were insufficient to identify this element; confirm it manually from the video.'
+          ? step.kind === 'manual'
+            ? 'This skill is not reliably identifiable by the current pose analyzer. Set the start and end times from the recording and confirm it manually.'
+            : 'Pose cues were insufficient to identify this element; confirm it manually from the video.'
           : step.kind === 'press'
             ? 'An inverted posture was detected, but the camera cannot verify that it came from a controlled press.'
           : step.kind === 'hold'
@@ -156,7 +158,7 @@ export class ComboAnalyzer {
     return {
       segments,
       sequenceFollowed: observedKinds.length
-        ? expectedKinds.length === observedKinds.length && expectedKinds.every((kind, index) => observedKinds[index] === kind)
+        ? !expectedKinds.includes('manual') && expectedKinds.length === observedKinds.length && expectedKinds.every((kind, index) => observedKinds[index] === kind)
         : null,
       duration: endTime,
       note: 'Exercise identity and transitions are estimated from 2D pose landmarks. Press-to-handstand intent, balance, contact, exact repetition depth, and timing boundaries cannot be reliably established automatically. Confirm uncertain segments manually.',

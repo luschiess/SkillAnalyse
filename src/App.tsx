@@ -67,7 +67,7 @@ const initialComboSteps: ComboStep[] = [
   { id: 'combo-hold', kind: 'hold', name: 'Handstand hold', repetitions: 1, holdSeconds: 5, description: '' },
   { id: 'combo-hspu', kind: 'hspu', name: 'Handstand Push-ups', repetitions: 2, holdSeconds: 0, description: '' },
 ]
-const comboKindNames: Record<ComboStepKind, string> = { press: 'Press-to-handstand', hold: 'Handstand hold', hspu: 'Handstand push-ups' }
+const comboKindNames: Record<ComboStepKind, string> = { press: 'Press-to-handstand', hold: 'Handstand hold', hspu: 'Handstand push-ups', manual: 'Manual review' }
 const freestyleLabels: Array<{ kind: FreestyleSkillKind; label: string }> = [
   { kind: 'handstand', label: 'Handstand hold' },
   { kind: 'handstand-push-up', label: 'Handstand Push-up pattern' },
@@ -104,6 +104,7 @@ function App() {
   const [query, setQuery] = useState('')
   const [comboEditorOpen, setComboEditorOpen] = useState(false)
   const [comboMode, setComboMode] = useState(false)
+  const [comboName, setComboName] = useState('')
   const [comboSteps, setComboSteps] = useState<ComboStep[]>(initialComboSteps)
   const [freestyleMode, setFreestyleMode] = useState(false)
   const [targetReps, setTargetReps] = useState(5)
@@ -448,7 +449,7 @@ function App() {
       id: crypto.randomUUID(),
       date: new Date().toISOString(),
       skillId: freestyle ? '' : selectedSkill?.id ?? '',
-      skillName: freestyle ? 'Freestyle' : combo ? 'Handstand Combo' : selectedSkill?.name ?? 'Unknown skill',
+      skillName: freestyle ? 'Freestyle' : combo ? comboName || 'Handstand Combo' : selectedSkill?.name ?? 'Unknown skill',
       category: selectedSkill?.category ?? 'handstand',
       report,
       ...(combo ? { combo } : {}),
@@ -679,6 +680,26 @@ function App() {
       return
     }
     setSelectedSkill(handstandSkill)
+    setComboName('Custom handstand combo')
+    setFreestyleMode(false)
+    setComboMode(true)
+    setComboEditorOpen(false)
+    setUploadedVideo(null)
+    setMediaMode('camera')
+    setScreen('session')
+  }
+
+  const startComboCameraAnalysis = (name: string, steps: ComboStep[]) => {
+    const handstandSkill = skills.find((skill) => skill.name === 'Handstand')
+    if (!handstandSkill) {
+      setError('The handstand analyzer is not available in the skill library.')
+      return
+    }
+    if (!steps.length) return
+    setError('')
+    setComboSteps(steps)
+    setComboName(name)
+    setSelectedSkill(handstandSkill)
     setFreestyleMode(false)
     setComboMode(true)
     setComboEditorOpen(false)
@@ -819,6 +840,7 @@ function App() {
   const poseVideoWidth = poseVideoSize.width || 1
   const poseVideoHeight = poseVideoSize.height || 1
   const activeSkill = activeSession ? getSkill(activeSession.skillId) : undefined
+  const comboHasManualReview = comboSteps.some((step) => step.kind === 'manual')
   const activeFreestyle = activeSession?.freestyle
   const reportLimitations = activeSession
     ? activeSession.report.limitations ?? ['This saved report predates detailed measurement limits. Treat 2D pose scores as estimates, not verified exercise recognition.']
@@ -925,7 +947,7 @@ function App() {
                       <label>Type<select value={step.kind} onChange={(event) => {
                         const kind = event.target.value as ComboStepKind
                         setComboSteps((previous) => previous.map((item) => item.id === step.id ? {
-                          ...item, kind, name: kind === 'press' ? 'Press to handstand' : kind === 'hold' ? 'Handstand hold' : 'Handstand Push-ups',
+                          ...item, kind, name: kind === 'press' ? 'Press to handstand' : kind === 'hold' ? 'Handstand hold' : kind === 'manual' ? 'Manual review' : 'Handstand Push-ups',
                         } : item))
                       }}><option value="press">Press to handstand</option><option value="hold">Handstand hold</option><option value="hspu">Handstand push-ups</option></select></label>
                       <label>Reps<input aria-label={`Repetitions for step ${index + 1}`} type="number" min="1" max="50" value={step.repetitions} onChange={(event) => setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, repetitions: Math.max(1, Math.min(50, Number(event.target.value) || 1)) } : item))} /></label>
@@ -939,7 +961,7 @@ function App() {
               </div>}
               {!comboEditorOpen && <div className="combo-preview">{comboSteps.map((step, index) => <span key={step.id}><b>{index + 1}</b>{step.name} · {step.repetitions} rep{step.repetitions === 1 ? '' : 's'}{step.holdSeconds > 0 ? ` · ${step.holdSeconds}s` : ''}</span>)}</div>}
             </section>
-            <ComboLibrary language={language} onFreestyle={startFreestyle} />
+            <ComboLibrary language={language} onFreestyle={startFreestyle} onAnalyzeCombo={startComboCameraAnalysis} />
             <div className="library-tools"><label className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search skills…" aria-label="Search skills" />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}</label>
               <label className="difficulty-filter"><span>DIFFICULTY</span><select aria-label="Filter by difficulty" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}><option value="all">All levels</option><option value="beginner">Beginner · 1–2</option><option value="intermediate">Intermediate · 3</option><option value="advanced">Advanced · 4–5</option></select></label>
               <label className="difficulty-filter"><span>{t('EQUIPMENT')}</span><select aria-label={t('Filter by equipment')} value={equipment} onChange={(event) => setEquipment(event.target.value)}><option value="all">{t('All equipment')}</option>{[...new Set(skills.flatMap((skill) => skill.equipment))].sort().map((item) => <option key={item} value={item}>{t(item)}</option>)}</select></label>
@@ -974,7 +996,7 @@ function App() {
 
         {screen === 'session' && selectedSkill && (
           <section className="page-content session-page">
-            <div className="page-heading compact-heading">            <div><button className="back-link" onClick={() => navigateTo(freestyleMode ? 'home' : 'select')}>← {freestyleMode ? 'Overview' : comboMode ? 'Combo editor' : 'Skill library'}</button><div className="eyebrow">{freestyleMode ? 'FREESTYLE · CONTINUOUS LOCAL POSE ANALYSIS' : comboMode ? 'HANDSTAND COMBO · LOCAL POSE ANALYSIS' : `${selectedSkill.categoryName.toUpperCase()} · LEVEL ${selectedSkill.level}`}</div><h1>{freestyleMode ? 'Move freely' : comboMode ? 'Record your combo' : selectedSkill.name}</h1><p className="lede">{freestyleMode ? 'No exercise selection needed. Record a sequence and review only the pose patterns supported by the current model.' : comboMode ? 'Perform the sequence in order. The camera estimates entry, hold and push-up phases; uncertain transitions remain unconfirmed.' : selectedSkill.description}</p></div></div>
+            <div className="page-heading compact-heading">            <div><button className="back-link" onClick={() => navigateTo(freestyleMode ? 'home' : 'select')}>← {freestyleMode ? 'Overview' : comboMode ? 'Combo editor' : 'Skill library'}</button><div className="eyebrow">{freestyleMode ? 'FREESTYLE · CONTINUOUS LOCAL POSE ANALYSIS' : comboMode ? t('COMBO · LOCAL POSE ANALYSIS') : `${selectedSkill.categoryName.toUpperCase()} · LEVEL ${selectedSkill.level}`}</div><h1>{freestyleMode ? 'Move freely' : comboMode ? 'Record your combo' : selectedSkill.name}</h1><p className="lede">{freestyleMode ? 'No exercise selection needed. Record a sequence and review only the pose patterns supported by the current model.' : comboMode ? comboHasManualReview ? t('Record your sequence. The current model estimates handstand entry, hold and push-up cues only; other skills need manual timeline review.') : 'Perform the sequence in order. The camera estimates entry, hold and push-up phases; uncertain transitions remain unconfirmed.' : selectedSkill.description}</p></div></div>
             <div className="session-layout">
               <div className="session-left">
                 <div className="camera-stage">
@@ -990,7 +1012,7 @@ function App() {
                   {countdown > 0 && <div className="countdown-overlay"><span>GET READY</span><strong>{countdown}</strong></div>}
                   {paused && <div className="paused-overlay"><span>RECORDING PAUSED</span></div>}
                   {recording && <div className="recording-clock"><span className="recording-dot" /> REC&nbsp; {formatTime(elapsed)}</div>}
-                  {analysisRunning && <div className="live-metric-chip">{freestyleMode ? <><span>POSE PATTERN · REPS</span><strong>{metrics.confidence < 0.45 ? 'UNCLEAR' : metrics.validReps}</strong></> : comboMode ? <><span>HSPU · HOLD</span><strong>{metrics.validReps} · {formatTime(metrics.currentHold)}</strong></> : selectedSkill.id === LUSCHIES_SKILL_ID ? <><span>{t('LUSCHIESS SKILL · PHASE')}</span><strong>{metrics.phaseLabel ? t(metrics.phaseLabel) : t('Waiting for kneeling pose')} · {metrics.validReps} {t('reps')}</strong></> : selectedSkill.type === 'dynamic' ? <><span>REPS</span><strong>{metrics.validReps}</strong></> : <><span>HOLD</span><strong>{formatTime(metrics.currentHold)}</strong></>}</div>}
+                  {analysisRunning && <div className="live-metric-chip">{freestyleMode ? <><span>POSE PATTERN · REPS</span><strong>{metrics.confidence < 0.45 ? 'UNCLEAR' : metrics.validReps}</strong></> : comboMode ? <><span>{t('HANDSTAND CUES · EST.')}</span><strong>{metrics.validReps} · {formatTime(metrics.currentHold)}</strong></> : selectedSkill.id === LUSCHIES_SKILL_ID ? <><span>{t('LUSCHIESS SKILL · PHASE')}</span><strong>{metrics.phaseLabel ? t(metrics.phaseLabel) : t('Waiting for kneeling pose')} · {metrics.validReps} {t('reps')}</strong></> : selectedSkill.type === 'dynamic' ? <><span>REPS</span><strong>{metrics.validReps}</strong></> : <><span>HOLD</span><strong>{formatTime(metrics.currentHold)}</strong></>}</div>}
                 </div>
                 {analysisRunning && metrics.confidence < 0.3 && <div className="perspective-warning" role="status"><CircleAlert size={15} /><span>{freestyleMode ? 'Too few visible body landmarks for useful freestyle analysis. Improve lighting and keep your full body in frame.' : `Pose landmarks are difficult to read. Adjust lighting and framing; recommended view: ${selectedSkill.camera}`}</span></div>}
                 <div className="camera-controls">
@@ -1013,7 +1035,7 @@ function App() {
               <aside className="session-right">
                 <section className="panel setup-panel"><div className="panel-heading"><div><div className="eyebrow">{freestyleMode ? 'FREESTYLE MODE' : comboMode ? 'COMBO ORDER' : 'SESSION SETUP'}</div><h2>{freestyleMode ? 'Automatic pattern scan' : comboMode ? 'Planned sequence' : 'Make it yours'}</h2></div></div>
                   {freestyleMode ? <><p className="freestyle-description">Freestyle starts without selecting a skill. It searches only for broad pose patterns already supported by the local model.</p>{freestylePrompt && <p className="freestyle-reference"><strong>{t('Reference sequence only')}:</strong> {t(freestylePrompt)}. {t('Freestyle does not enforce this order.')}</p>}<ul className="freestyle-support-list"><li>Handstand holds and visible HSPU elbow cycles</li><li>{t('Kneeling-start to handstand pose sequence (estimated)')}</li><li>Horizontal front-lever-like body positions</li><li>Horizontal push-up patterns and elbow cycles</li></ul><div className="disclaimer"><CircleAlert size={15} /><p>Press intent, push-up variations, wall contact, pull-ups and muscle-ups are not reliably identifiable from these landmarks alone. Unclassified periods are labeled unknown, not guessed.</p></div></>
-                    : comboMode ? <><ol className="combo-session-order">{comboSteps.map((step) => <li key={step.id}><span>{comboKindNames[step.kind]}</span><strong>{step.name}</strong><small>{step.description || `${step.repetitions} rep${step.repetitions === 1 ? '' : 's'}${step.holdSeconds > 0 ? ` · ${step.holdSeconds}s hold` : ''}`}</small></li>)}</ol><div className="disclaimer"><CircleAlert size={15} /><p>Automatic labels are estimates. The final timeline asks for confirmation where pose cues are ambiguous.</p></div></>
+                    : comboMode ? <><p className="freestyle-reference">{comboName}</p><ol className="combo-session-order">{comboSteps.map((step) => <li key={step.id}><span>{t(comboKindNames[step.kind])}</span><strong>{step.name}</strong><small>{`${step.repetitions} rep${step.repetitions === 1 ? '' : 's'}${step.holdSeconds > 0 ? ` · ${step.holdSeconds}s hold` : ''}${step.description ? ` · ${step.description}` : ''}`}</small></li>)}</ol><div className="disclaimer"><CircleAlert size={15} /><p>{comboHasManualReview ? t('Only handstand cues are estimated automatically. Every other element is kept in the plan for manual timing and confirmation in the report.') : 'Automatic labels are estimates. The final timeline asks for confirmation where pose cues are ambiguous.'}</p></div></>
                     : <>
                   {selectedSkill.type === 'dynamic' && selectedSkill.id !== LUSCHIES_SKILL_ID && <div className="form-row"><label htmlFor="target-reps">Rep target</label><div className="number-control"><button onClick={() => setTargetReps(Math.max(1, targetReps - 1))} aria-label="Decrease rep target">−</button><input id="target-reps" type="number" min="1" max="50" value={targetReps} onChange={(event) => setTargetReps(Math.min(50, Math.max(1, Number(event.target.value) || 1)))} /><button onClick={() => setTargetReps(Math.min(50, targetReps + 1))} aria-label="Increase rep target">+</button></div></div>}
                   {(selectedSkill.type !== 'dynamic' || selectedSkill.id === LUSCHIES_SKILL_ID) && <><label className="toggle-row"><span><strong>Measure valid holds</strong><small>Track only time in a qualified position</small></span><input type="checkbox" checked={measureHold} onChange={(event) => setMeasureHold(event.target.checked)} /><i /></label>
@@ -1045,7 +1067,7 @@ function App() {
                   <Metric label="Measured hold time" value={formatTime(activeSession.report.totalHold)} helper="Estimated static-looking intervals, not proof of balance." icon={<Clock3 size={17} />} />
                   <Metric label="Analyzed pose frames" value={`${activeSession.freestyle.framesAnalyzed}`} helper={`${activeSession.freestyle.lowConfidenceFrames} frames had low or missing landmark confidence.`} icon={<ShieldCheck size={17} />} />
                 </> : activeSession.combo ? <>
-                  <Metric label="Detected HSPU cycles" value={String(activeSession.report.validReps)} helper={`Incomplete phase · ${activeSession.report.partialReps}`} icon={<Activity size={17} />} />
+                  {activeSession.combo.segments.some((segment) => segment.kind === 'hspu') && <Metric label="Detected inverted elbow cycles" value={String(activeSession.report.validReps)} helper={`Handstand-only 2D cue; incomplete phase · ${activeSession.report.partialReps}`} icon={<Activity size={17} />} />}
                   <Metric label="Estimated inverted time" value={formatTime(activeSession.report.totalHold)} helper="Inverted pose interval; not proof of balance or a stationary hold." icon={<Clock3 size={17} />} />
                   <Metric label="Pose frames analyzed" value={String(activeSession.report.framesAnalyzed)} helper={`Mean landmark confidence · ${activeSession.report.confidence}%`} icon={<ShieldCheck size={17} />} />
                 </> : activeSkill?.type === 'dynamic' ? <>

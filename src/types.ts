@@ -74,7 +74,7 @@ export interface TrainingSession {
   freestyle?: FreestyleAnalysis
 }
 
-export type ComboStepKind = 'press' | 'hold' | 'hspu'
+export type ComboStepKind = 'press' | 'hold' | 'hspu' | 'manual'
 
 export interface ComboStep {
   id: string
