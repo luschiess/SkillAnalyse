@@ -1,5 +1,6 @@
+import { LUSCHIES_SKILL_ID } from '../types'
 import type { AnalysisReport, LiveMetrics, PosePoint, Skill } from '../types'
-import { landmark } from './analyzers/common'
+import { landmark, midpoint } from './analyzers/common'
 import { analyzeSkillFrame } from './analyzers'
 
 const avg = (values: number[]) => values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0
@@ -31,6 +32,17 @@ export class SkillAnalyzer {
   private countedLeftWrist: number | undefined
   private countedRightWrist: number | undefined
   private smoothedAlignment: number | undefined
+  private luschiesPhase: 'waiting-for-kneeling' | 'started' | 'confirming-handstand' | 'holding' | 'complete' = 'waiting-for-kneeling'
+  private luschiesStartTime: number | undefined
+  private luschiesTransitionTime: number | undefined
+  private luschiesHandstandTime: number | undefined
+  private luschiesStartHipY: number | undefined
+  private luschiesStartAnkleY: number | undefined
+  private luschiesCandidateStart: number | undefined
+  private luschiesCandidateFrames = 0
+  private luschiesCandidateConfidence: number[] = []
+  private luschiesCandidateAlignments: number[] = []
+  private luschiesHoldAlignments: number[] = []
 
   constructor(
     skill: Skill,
@@ -41,11 +53,23 @@ export class SkillAnalyzer {
   }
 
   consume(points: PosePoint[] | null, time: number): LiveMetrics {
-    if (!points || points.length <= landmark.rightAnkle) return this.live(0)
+    if (!points || points.length <= landmark.rightAnkle) {
+      if (this.skill.id === LUSCHIES_SKILL_ID) {
+        if (this.luschiesPhase === 'holding') this.luschiesPhase = 'complete'
+        if (this.luschiesPhase === 'confirming-handstand') this.resetLuschiesCandidate()
+        this.currentHold = 0
+        this.previousTime = time
+      }
+      return this.live(0)
+    }
     const frame = analyzeSkillFrame(this.skill, points)
     const { confidence, alignment, symmetry, jointExtension, kneeAngle } = frame
     if (confidence < 0.3) {
       this.currentHold = 0
+      if (this.skill.id === LUSCHIES_SKILL_ID) {
+        if (this.luschiesPhase === 'holding') this.luschiesPhase = 'complete'
+        if (this.luschiesPhase === 'confirming-handstand') this.resetLuschiesCandidate()
+      }
       this.previousTime = time
       return this.live(confidence)
     }
@@ -57,6 +81,10 @@ export class SkillAnalyzer {
 
     const dt = this.previousTime === undefined ? 0 : Math.max(0, Math.min(0.5, time - this.previousTime))
     this.previousTime = time
+    if (this.skill.id === LUSCHIES_SKILL_ID) {
+      this.updateLuschiesSkill(points, time, frame, dt)
+      return this.live(confidence)
+    }
     const isStatic = this.skill.type === 'static' || this.skill.type === 'combined'
     const scale = this.skill.category === 'front-lever' ? 2.7 : 2.4
     const minAlignment = 100 - Math.max(0, this.settings.positionTolerance - 8) * scale
@@ -135,6 +163,82 @@ export class SkillAnalyzer {
     }
   }
 
+  private updateLuschiesSkill(points: PosePoint[], time: number, frame: ReturnType<typeof analyzeSkillFrame>, dt: number) {
+    if (frame.confidence < 0.45 || this.luschiesPhase === 'complete') return
+    const shoulders = midpoint(points[landmark.leftShoulder], points[landmark.rightShoulder])
+    const hips = midpoint(points[landmark.leftHip], points[landmark.rightHip])
+    const knees = midpoint(points[landmark.leftKnee], points[landmark.rightKnee])
+    const ankles = midpoint(points[landmark.leftAnkle], points[landmark.rightAnkle])
+    const kneelingCue = hips.y > shoulders.y + 0.035 && knees.y > hips.y + 0.01 && frame.kneeAngle < 145
+    const handstandCue = ankles.y < shoulders.y - 0.015 && frame.verticalDeviation < 42 && frame.elbowAngle >= 125
+
+    if (this.luschiesPhase === 'waiting-for-kneeling' && kneelingCue) {
+      this.luschiesPhase = 'started'
+      this.luschiesStartTime = time
+      this.luschiesStartHipY = hips.y
+      this.luschiesStartAnkleY = ankles.y
+      return
+    }
+    if (this.luschiesPhase === 'started') {
+      const risesFromStart = this.luschiesStartHipY !== undefined && this.luschiesStartAnkleY !== undefined &&
+        (hips.y < this.luschiesStartHipY - 0.04 || ankles.y < this.luschiesStartAnkleY - 0.04)
+      if (risesFromStart) this.luschiesTransitionTime ??= time
+      if (handstandCue) {
+        this.luschiesTransitionTime ??= time
+        this.luschiesPhase = 'confirming-handstand'
+        this.luschiesCandidateStart = time
+        this.luschiesCandidateFrames = 1
+        this.luschiesCandidateConfidence = [frame.confidence]
+        this.luschiesCandidateAlignments = [frame.alignment]
+        return
+      }
+    }
+    if (this.luschiesPhase === 'confirming-handstand') {
+      if (!handstandCue) {
+        this.resetLuschiesCandidate()
+        return
+      }
+      this.luschiesCandidateFrames += 1
+      this.luschiesCandidateConfidence.push(frame.confidence)
+      this.luschiesCandidateAlignments.push(frame.alignment)
+      if (this.luschiesCandidateFrames >= 6 && this.luschiesCandidateStart !== undefined && time - this.luschiesCandidateStart >= 0.35) {
+        this.luschiesPhase = 'holding'
+        this.luschiesHandstandTime = this.luschiesCandidateStart
+        this.validReps = 1
+        this.repConfidence.push(avg(this.luschiesCandidateConfidence))
+        this.luschiesHoldAlignments.push(...this.luschiesCandidateAlignments)
+        const confirmedHold = Math.max(0, time - this.luschiesCandidateStart)
+        if (this.settings.measureHold) {
+          this.currentHold = confirmedHold
+          this.totalHold += confirmedHold
+          this.longestHold = Math.max(this.longestHold, confirmedHold)
+        }
+      }
+      return
+    }
+    if (this.luschiesPhase === 'holding') {
+      if (!handstandCue) {
+        this.luschiesPhase = 'complete'
+        this.currentHold = 0
+        return
+      }
+      if (this.settings.measureHold) {
+        this.currentHold += dt
+        this.totalHold += dt
+        this.longestHold = Math.max(this.longestHold, this.currentHold)
+      }
+      this.luschiesHoldAlignments.push(frame.alignment)
+    }
+  }
+
+  private resetLuschiesCandidate() {
+    this.luschiesPhase = 'started'
+    this.luschiesCandidateStart = undefined
+    this.luschiesCandidateFrames = 0
+    this.luschiesCandidateConfidence = []
+    this.luschiesCandidateAlignments = []
+  }
+
   private live(confidence: number): LiveMetrics {
     return {
       confidence,
@@ -147,6 +251,7 @@ export class SkillAnalyzer {
   }
 
   report(): AnalysisReport {
+    if (this.skill.id === LUSCHIES_SKILL_ID) return this.luschiesReport()
     const partialReps = this.partialReps + (this.phase === 'lowered' || this.phase === 'returning' ? 1 : 0)
     const confidence = avg(this.samples.map((sample) => sample.confidence))
     const alignment = avg(this.samples.map((sample) => sample.alignment))
@@ -242,6 +347,89 @@ export class SkillAnalyzer {
       timestampExamples,
       movementRange,
       limitations,
+    }
+  }
+
+  private luschiesReport(): AnalysisReport {
+    const confidence = avg(this.samples.map((sample) => sample.confidence))
+    const enoughEvidence = this.samples.length >= 12 && confidence >= 0.45
+    const startTime = this.luschiesStartTime
+    const transitionTime = this.luschiesTransitionTime
+    const handstandTime = this.luschiesHandstandTime
+    const startDetected = startTime !== undefined
+    const entryDetected = handstandTime !== undefined
+    const handstandAlignment = this.luschiesHoldAlignments.length
+      ? avg(this.luschiesHoldAlignments)
+      : 0
+    const alignmentVariance = avg(this.luschiesHoldAlignments.map((value) => (value - handstandAlignment) ** 2))
+    const stability = this.luschiesHoldAlignments.length >= 6
+      ? clamp(100 - Math.sqrt(alignmentVariance) * 2)
+      : 0
+    const duration = startTime !== undefined && handstandTime !== undefined
+      ? Math.max(0, handstandTime - startTime)
+      : undefined
+    const holdDetail = this.settings.measureHold
+      ? `Estimated stable handstand interval: ${this.longestHold.toFixed(1)}s; target ${this.settings.targetHold}s.`
+      : 'Hold measurement was disabled for this session.'
+    const criteria = [
+      {
+        name: 'Kneeling-start cue',
+        score: startDetected ? 100 : 0,
+        detail: startTime !== undefined ? `A pose compatible with kneeling was observed at ${startTime.toFixed(1)}s; this does not verify floor contact.` : enoughEvidence ? 'No confident kneeling-start pose was identified.' : 'Not assessable because pose evidence was insufficient.',
+      },
+      {
+        name: 'Upward-transition cue',
+        score: transitionTime !== undefined ? 100 : 0,
+        detail: transitionTime !== undefined ? `Visible hip or ankle landmarks began moving upward at about ${transitionTime.toFixed(1)}s; this does not establish how the movement was generated.` : startDetected ? 'No clear upward landmark change was detected after the kneeling-start cue.' : 'Not assessable without a kneeling-start cue.',
+      },
+      {
+        name: 'Handstand-entry cue',
+        score: entryDetected ? 100 : 0,
+        detail: entryDetected && duration !== undefined ? `A sustained inverted pose followed after about ${duration.toFixed(1)}s; a controlled press cannot be distinguished from other entries.` : 'No sustained handstand posture was confidently identified after the start cue.',
+      },
+      {
+        name: 'Final handstand alignment',
+        score: Math.round(handstandAlignment),
+        detail: this.luschiesHoldAlignments.length ? 'Estimated from visible 2D shoulder, hip and ankle landmarks while inverted.' : 'Not assessable without a sustained, visible handstand posture.',
+      },
+      {
+        name: 'Final hold steadiness',
+        score: Math.round(stability),
+        detail: this.luschiesHoldAlignments.length >= 6 ? `${holdDetail} Stability is only a proxy from frame-to-frame 2D alignment variation; balance is not verified.` : 'Not enough sustained handstand frames to estimate steadiness.',
+      },
+    ]
+    const issues: string[] = []
+    if (!enoughEvidence) issues.push('There were too few confident pose frames to assess this attempt.')
+    else if (!startDetected) issues.push('A kneeling-start cue was not detected; review the video and mark the phase manually if appropriate.')
+    if (startDetected && !entryDetected) issues.push('The handstand finish was not confidently confirmed after the start cue.')
+    const suggestions = [
+      'Use a side view with the full body, hands and floor visible throughout the movement.',
+      'Review the estimated start and handstand-entry cues against the recording; confirm ambiguous timing manually.',
+    ]
+    return {
+      score: null,
+      confidence: Math.round(confidence * 100),
+      insufficientConfidence: !enoughEvidence,
+      framesAnalyzed: this.samples.length,
+      validReps: entryDetected ? 1 : 0,
+      partialReps: startDetected && !entryDetected ? 1 : 0,
+      longestHold: this.longestHold,
+      totalHold: this.totalHold,
+      repConfidence: this.repConfidence,
+      criteria,
+      issues,
+      positives: entryDetected ? ['A kneeling-compatible start and sustained handstand pose were both observed.'] : ['No complete skill was inferred without confident start and finish cues.'],
+      suggestions,
+      timestampExamples: startTime !== undefined
+        ? [{ time: startTime, issue: 'Kneeling-start cue' }]
+        : [],
+      movementRange: 'not-assessable',
+      limitations: [
+        'The camera detects a pose compatible with kneeling followed by a sustained inverted posture; it cannot verify the named skill or the exact movement path.',
+        'A single 2D pose view cannot distinguish a controlled press from momentum, verify hand/floor contact, measure force, or prove balance.',
+        'Hold duration and steadiness are estimates from visible pose landmarks and can be affected by occlusion, camera angle, and tracking gaps.',
+        ...(!enoughEvidence ? ['There were too few confident pose frames to make a reliable assessment.'] : []),
+      ],
     }
   }
 }

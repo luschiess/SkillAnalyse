@@ -15,7 +15,9 @@ interface FrameSample {
   elbowAngle: number
   kneeAngle: number
   hipAngle: number
+  shoulderY: number
   hipY: number
+  kneeY: number
   ankleY: number
 }
 
@@ -32,6 +34,8 @@ function classifyPose(points: PosePoint[]): FrameSample {
   const lever = analyzeFrontLever(points)
   const pushup = analyzePushUp(points)
   const shoulder = midpoint(points[landmark.leftShoulder], points[landmark.rightShoulder])
+  const hips = midpoint(points[landmark.leftHip], points[landmark.rightHip])
+  const knees = midpoint(points[landmark.leftKnee], points[landmark.rightKnee])
   const wrists = midpoint(points[landmark.leftWrist], points[landmark.rightWrist])
   const ankles = midpoint(points[landmark.leftAnkle], points[landmark.rightAnkle])
   const confidence = handstand.confidence
@@ -70,10 +74,18 @@ function classifyPose(points: PosePoint[]): FrameSample {
     elbowAngle,
     kneeAngle,
     hipAngle,
-    hipY: midpoint(points[landmark.leftHip], points[landmark.rightHip]).y,
+    shoulderY: shoulder.y,
+    hipY: hips.y,
+    kneeY: knees.y,
     ankleY: ankles.y,
   }
 }
+
+const kneelingCue = (sample: FrameSample) =>
+  sample.confidence >= 0.55 &&
+  sample.hipY > sample.shoulderY + 0.035 &&
+  sample.kneeY > sample.hipY + 0.01 &&
+  sample.kneeAngle < 145
 
 function countCycles(samples: FrameSample[]) {
   let phase: 'top' | 'bottom' = 'top'
@@ -113,7 +125,7 @@ export class FreestyleAnalyzer {
   consume(points: PosePoint[] | null, time: number): LiveMetrics {
     if (!points || points.length <= landmark.rightAnkle) {
       this.lowConfidenceFrames += 1
-      this.samples.push({ time, kind: null, confidence: 0, alignment: 0, elbowAngle: 0, kneeAngle: 0, hipAngle: 0, hipY: 0, ankleY: 0 })
+      this.samples.push({ time, kind: null, confidence: 0, alignment: 0, elbowAngle: 0, kneeAngle: 0, hipAngle: 0, shoulderY: 0, hipY: 0, kneeY: 0, ankleY: 0 })
       this.lastMetrics = { ...this.lastMetrics, confidence: 0, currentHold: 0 }
       if (this.bottomAt !== undefined) {
         this.livePartialRepetitions += 1
@@ -170,7 +182,7 @@ export class FreestyleAnalyzer {
       segments,
       reliableRepetitions: segments.reduce((sum, segment) =>
         sum + (segment.status === 'reliable' ? segment.repetitions : 0), 0),
-      note: 'Skill labels are estimates from 2D pose geometry, not validated exercise recognition. Camera angle, equipment, wall contact, depth and occlusion are not identified. Similar variations (for example push-up styles, muscle-ups and pull-ups) cannot be reliably distinguished by these pose landmarks.',
+      note: 'Skill labels are estimates from 2D pose geometry, not validated exercise recognition. A kneeling-start to handstand pattern is labeled Luschies Skill only when a kneeling cue and subsequent upward-to-inverted landmarks are visible; this does not prove a controlled press. Camera angle, equipment, wall contact, depth and occlusion are not identified. Similar variations (for example push-up styles, muscle-ups and pull-ups) cannot be reliably distinguished by these pose landmarks.',
     }
   }
 
@@ -224,15 +236,31 @@ export class FreestyleAnalyzer {
     }
     return events.flatMap((event) => {
       const samples = event.samples
-      const start = samples[0]?.time ?? 0
-      const end = samples[samples.length - 1]?.time ?? start
+      const postureStart = samples[0]?.time ?? 0
+      const end = samples[samples.length - 1]?.time ?? postureStart
+      const postureDuration = Math.max(0, end - postureStart)
+      if (samples.length < 8 || postureDuration < 0.55) return []
+      const kneelingStart = event.kind === 'handstand'
+        ? [...this.samples].reverse().find((sample) =>
+          sample.time < postureStart && postureStart - sample.time <= 3 && kneelingCue(sample))
+        : undefined
+      const risesFromKneeling = kneelingStart && this.samples.some((sample) =>
+        sample.time > kneelingStart.time && sample.time < postureStart &&
+        sample.confidence >= 0.45 &&
+        (sample.hipY < kneelingStart.hipY - 0.06 || sample.ankleY < kneelingStart.ankleY - 0.06))
+      const isLuschiesSkill = Boolean(kneelingStart && risesFromKneeling)
+      const start = isLuschiesSkill && kneelingStart ? kneelingStart.time : postureStart
       const duration = Math.max(0, end - start)
-      if (samples.length < 8 || duration < 0.55) return []
-      const meanConfidence = mean(samples.map((sample) => sample.confidence))
+      const meanConfidence = mean([
+        ...samples.map((sample) => sample.confidence),
+        ...(isLuschiesSkill && kneelingStart ? [kneelingStart.confidence] : []),
+      ])
       const alignment = mean(samples.map((sample) => sample.alignment))
       const cycles = event.kind === 'handstand' || event.kind === 'push-up' ? countCycles(samples) : { repetitions: 0, partialRepetitions: 0 }
       const holdSeconds = cycles.repetitions > 0 || event.kind === 'unknown' || event.kind === 'push-up' ? 0 : duration
-      const kind: PoseKind = event.kind === 'handstand' && cycles.repetitions > 0
+      const kind: PoseKind = isLuschiesSkill
+        ? 'luschies-skill'
+        : event.kind === 'handstand' && cycles.repetitions > 0
         ? 'handstand-push-up'
         : event.kind
       if (kind === 'unknown' && duration < 1.5) return []
@@ -245,13 +273,15 @@ export class FreestyleAnalyzer {
         if (bodyMotion < 0.035 && elbowMotion < 25) return []
       }
       const highVisibility = meanConfidence >= 0.78
-      const status: FreestyleSegment['status'] = kind === 'unknown' || kind === 'handstand' && !highVisibility
+      const status: FreestyleSegment['status'] = kind === 'unknown' || (kind === 'handstand' || kind === 'luschies-skill') && !highVisibility
         ? 'unclear'
         : highVisibility && (kind === 'handstand-push-up' || kind === 'push-up') && cycles.repetitions > 0
           ? 'reliable'
           : 'estimated'
       const name = kind === 'unknown'
         ? 'Unclassified movement'
+        : kind === 'luschies-skill'
+        ? 'Luschies Skill'
         : kind === 'handstand-push-up'
         ? 'Handstand Push-up pattern'
         : kind === 'handstand'
@@ -274,7 +304,7 @@ export class FreestyleAnalyzer {
         end,
         repetitions: cycles.repetitions,
         partialRepetitions: cycles.partialRepetitions,
-        holdSeconds,
+        holdSeconds: kind === 'luschies-skill' ? postureDuration : holdSeconds,
         confidence: Math.round(meanConfidence * 100),
         status,
         alignment: Math.round(alignment),

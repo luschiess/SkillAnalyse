@@ -4,6 +4,7 @@ export type CategoryId =
   | 'human-flag' | 'rings' | 'freestyle' | 'floorwork' | 'dynamic-skills'
 export type SkillType = 'static' | 'dynamic' | 'combined' | 'transition' | 'information'
 export type AnalysisSupport = 'automatic' | 'partial' | 'manual'
+export const LUSCHIES_SKILL_ID = 'handstand-luschies-skill'
 
 export interface Skill {
   id: string
@@ -114,6 +115,7 @@ export type FreestyleSkillKind =
   | 'front-lever-raise'
   | 'push-up'
   | 'press-to-handstand'
+  | 'luschies-skill'
   | 'pull-up'
   | 'muscle-up'
   | 'unknown'
