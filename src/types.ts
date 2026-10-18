@@ -74,7 +74,7 @@ export interface TrainingSession {
   freestyle?: FreestyleAnalysis
 }
 
-export type ComboStepKind = 'press' | 'hold' | 'hspu' | 'manual'
+export type ComboStepKind = 'press' | 'hold' | 'hspu' | 'elbow-lever-to-handstand' | 'manual'
 
 export interface ComboStep {
   id: string
@@ -92,6 +92,7 @@ export interface ComboSegment {
   start: number
   end: number
   repetitions: number
+  measuredHoldSeconds?: number
   targetRepetitions: number
   targetHoldSeconds: number
   description: string

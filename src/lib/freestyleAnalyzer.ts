@@ -91,6 +91,7 @@ const kneelingCue = (sample: FrameSample) =>
 
 const LUSCHIES_ENTRY_WINDOW_SECONDS = 8
 const LUSCHIES_MIN_ANKLE_RISE = 0.12
+const ELBOW_LEVER_ENTRY_WINDOW_SECONDS = 8
 
 function findKneelingStart(samples: FrameSample[], postureStart: number) {
   const preceding = samples.filter((sample) =>
@@ -146,6 +147,7 @@ function measureHoldSeconds(samples: FrameSample[]) {
 }
 
 export class FreestyleAnalyzer {
+  private readonly targetElbowLeverToHandstand: boolean
   private samples: FrameSample[] = []
   private lowConfidenceFrames = 0
   private previousTime: number | undefined
@@ -157,6 +159,10 @@ export class FreestyleAnalyzer {
   private totalHold = 0
   private longestHold = 0
   private lastMetrics: LiveMetrics = { confidence: 0, validReps: 0, partialReps: 0, currentHold: 0, longestHold: 0, totalHold: 0 }
+
+  constructor(options: { targetElbowLeverToHandstand?: boolean } = {}) {
+    this.targetElbowLeverToHandstand = options.targetElbowLeverToHandstand ?? false
+  }
 
   consume(points: PosePoint[] | null, time: number): LiveMetrics {
     if (!points || points.length <= landmark.rightAnkle) {
@@ -218,7 +224,9 @@ export class FreestyleAnalyzer {
       segments,
       reliableRepetitions: segments.reduce((sum, segment) =>
         sum + (segment.status === 'reliable' ? segment.repetitions : 0), 0),
-      note: 'Skill labels are estimates from 2D pose geometry, not validated exercise recognition. A kneeling-start to handstand pattern is labeled Luschiess Skill only when a kneeling cue and subsequent upward-to-inverted landmarks are visible; this does not prove a controlled press. A bent-arm horizontal support followed by a handstand may be labeled as an estimated Elbow Lever to Handstand transition, but elbow contact and similar push-up variations cannot be distinguished reliably. Camera angle, equipment, wall contact, depth and occlusion are not identified. Similar variations (for example push-up styles, muscle-ups and pull-ups) cannot be reliably distinguished by these pose landmarks.',
+      note: this.targetElbowLeverToHandstand
+        ? 'The Elbow Lever to Handstand label is estimated when bent-arm horizontal support is followed by an inverted pose within the analysis window. 2D landmarks cannot confirm elbow contact, controlled press intent, equipment contact, balance, or distinguish similar push-up-to-handstand variations. Review and confirm the interval in the video.'
+        : 'Skill labels are estimates from 2D pose geometry, not validated exercise recognition. A kneeling-start to handstand pattern is labeled Luschiess Skill only when a kneeling cue and subsequent upward-to-inverted landmarks are visible; this does not prove a controlled press. A bent-arm horizontal support followed by a handstand may be labeled as an estimated Elbow Lever to Handstand transition, but elbow contact and similar push-up variations cannot be distinguished reliably. Camera angle, equipment, wall contact, depth and occlusion are not identified. Similar variations (for example push-up styles, muscle-ups and pull-ups) cannot be reliably distinguished by these pose landmarks.',
     }
   }
 
@@ -281,19 +289,20 @@ export class FreestyleAnalyzer {
           candidate.kind === 'handstand' &&
           candidate.samples.length >= 8 &&
           (candidate.samples[candidate.samples.length - 1]?.time ?? 0) - (candidate.samples[0]?.time ?? 0) >= 0.55 &&
-          (candidate.samples[0]?.time ?? Infinity) - end <= 2.5)
+          (candidate.samples[0]?.time ?? Infinity) - end <= (this.targetElbowLeverToHandstand ? ELBOW_LEVER_ENTRY_WINDOW_SECONDS : 2.5))
         : undefined
       const isElbowLeverEntry = Boolean(followingHandstand &&
         mean(samples.map((sample) => sample.elbowAngle)) < 125)
       if (event.kind === 'push-up' && isElbowLeverEntry) return []
+      if (this.targetElbowLeverToHandstand && event.kind === 'push-up') return []
       const precedingElbowLever = event.kind === 'handstand'
         ? [...events.slice(0, eventIndex)].reverse().find((candidate) =>
           candidate.kind === 'push-up' &&
-          postureStart - (candidate.samples[candidate.samples.length - 1]?.time ?? -Infinity) <= 2.5 &&
+          postureStart - (candidate.samples[candidate.samples.length - 1]?.time ?? -Infinity) <= (this.targetElbowLeverToHandstand ? ELBOW_LEVER_ENTRY_WINDOW_SECONDS : 2.5) &&
           mean(candidate.samples.map((sample) => sample.elbowAngle)) < 125)
         : undefined
       const isElbowLeverTransition = Boolean(precedingElbowLever)
-      const kneelingStart = event.kind === 'handstand'
+      const kneelingStart = event.kind === 'handstand' && !this.targetElbowLeverToHandstand
         ? findKneelingStart(this.samples, postureStart)
         : undefined
       const startsRising = kneelingStart && this.samples.some((sample) =>

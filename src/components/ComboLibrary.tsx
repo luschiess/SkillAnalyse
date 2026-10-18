@@ -141,8 +141,10 @@ export function ComboLibrary({ language, onFreestyle, onAnalyzeCombo }: {
         setError(t('A skill in this combo is no longer available.'))
         return
       }
-      const kind: ComboStepKind = skill.id === LUSCHIES_SKILL_ID || skill.category === 'bent-arm-press'
-        ? 'press'
+      const kind: ComboStepKind = skill.name === 'Elbow Lever to Handstand'
+        ? 'elbow-lever-to-handstand'
+        : skill.id === LUSCHIES_SKILL_ID || skill.category === 'bent-arm-press'
+          ? 'press'
         : skill.category === 'handstand-push-up'
           ? 'hspu'
           : skill.category === 'handstand' && skill.type !== 'dynamic'

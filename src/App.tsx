@@ -43,6 +43,72 @@ const movementRangeLabels: Record<AnalysisReport['movementRange'], string> = {
 }
 const movementRangeLabel = (range: AnalysisReport['movementRange'] | undefined) => range ? movementRangeLabels[range] : 'Not recorded'
 const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
+type GoalState = 'met' | 'not-met' | 'review'
+interface GoalMetric {
+  label: string
+  actual: number
+  target: number
+  state: GoalState
+  detail: string
+  unit: 'reps' | 'seconds' | 'cue'
+}
+interface GoalCheck {
+  label: string
+  actual: number | null
+  target: number | null
+  state: GoalState
+  detail: string
+  unit: 'reps' | 'seconds' | 'cue'
+  secondary?: GoalMetric
+}
+const goalStateFor = (actual: number, target: number, needsReview: boolean): GoalState =>
+  needsReview ? 'review' : actual >= target ? 'met' : 'not-met'
+const goalCheckState = (check: GoalCheck): GoalState => {
+  if (check.state === 'review' || check.secondary?.state === 'review') return 'review'
+  if (check.state === 'not-met' || check.secondary?.state === 'not-met') return 'not-met'
+  return 'met'
+}
+const formatGoalValue = (value: number, unit: GoalCheck['unit']) =>
+  unit === 'seconds' ? formatTime(value) : `${value}`
+const goalStateLabel: Record<GoalState, string> = {
+  met: 'Estimated target reached',
+  'not-met': 'Not yet reached / not detected',
+  review: 'Needs manual review',
+}
+function GoalResultCard({ check, language }: { check: GoalCheck; language: Language }) {
+  const t = (value: string) => translate(value, language)
+  const progress = check.actual !== null && check.target !== null && check.target > 0
+    ? Math.min(100, check.actual / check.target * 100)
+    : 0
+  return (
+    <div className={`goal-check goal-${goalCheckState(check)}`}>
+      <div className="goal-check-heading"><strong>{t(check.label)}</strong><span>{t(goalStateLabel[goalCheckState(check)])}</span></div>
+      <p>{t(check.detail)}</p>
+      {check.actual !== null && check.target !== null && (
+        <>
+          <div className="goal-check-values"><b>{formatGoalValue(check.actual, check.unit)}</b><span>/ {formatGoalValue(check.target, check.unit)} {t(check.unit === 'seconds' ? 'target' : 'reps')}</span></div>
+          <div className="goal-check-bar"><i style={{ width: `${progress}%` }} /></div>
+        </>
+      )}
+      {check.secondary && <div className={`goal-check-secondary goal-${check.secondary.state}`}>
+        <div><span>{t(check.secondary.label)}</span><small>{t(goalStateLabel[check.secondary.state])}</small></div>
+        <strong>{formatGoalValue(check.secondary.actual, check.secondary.unit)} / {formatGoalValue(check.secondary.target, check.secondary.unit)} {t('target')}</strong>
+      </div>}
+    </div>
+  )
+}
+function GoalResultInline({ check, language }: { check: GoalCheck; language: Language }) {
+  const t = (value: string) => translate(value, language)
+  return (
+    <div className={`combo-step-goal goal-${goalCheckState(check)}`}>
+      <span>{t(goalStateLabel[goalCheckState(check)])}</span>
+      {check.actual !== null && check.target !== null && (
+        <strong>{formatGoalValue(check.actual, check.unit)} / {formatGoalValue(check.target, check.unit)} {t(check.unit === 'seconds' ? 'target' : 'reps')}</strong>
+      )}
+      {check.secondary && <div className="combo-step-goal-secondary"><span>{t(check.secondary.label)} · {t(goalStateLabel[check.secondary.state])}</span><strong>{formatGoalValue(check.secondary.actual, check.secondary.unit)} / {formatGoalValue(check.secondary.target, check.secondary.unit)} {t('target')}</strong></div>}
+    </div>
+  )
+}
 const loadStringList = (key: string, description: string) => {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(key) ?? '[]')
@@ -68,7 +134,7 @@ const initialComboSteps: ComboStep[] = [
   { id: 'combo-hold', kind: 'hold', name: 'Handstand hold', repetitions: 1, holdSeconds: 5, description: '' },
   { id: 'combo-hspu', kind: 'hspu', name: 'Handstand Push-ups', repetitions: 2, holdSeconds: 0, description: '' },
 ]
-const comboKindNames: Record<ComboStepKind, string> = { press: 'Press-to-handstand', hold: 'Handstand hold', hspu: 'Handstand push-ups', manual: 'Manual review' }
+const comboKindNames: Record<ComboStepKind, string> = { press: 'Press-to-handstand', hold: 'Handstand hold', hspu: 'Handstand push-ups', 'elbow-lever-to-handstand': 'Elbow Lever to Handstand', manual: 'Manual review' }
 const freestyleLabels: Array<{ kind: FreestyleSkillKind; label: string }> = [
   { kind: 'handstand', label: 'Handstand hold' },
   { kind: 'handstand-push-up', label: 'Handstand Push-up pattern' },
@@ -209,6 +275,7 @@ function App() {
   const startedAtRef = useRef(0)
   const pausedAtRef = useRef<number | null>(null)
   const pausedDurationRef = useRef(0)
+  const uploadedVideoMutedRef = useRef<boolean | null>(null)
 
   const {
     needRefresh: [needRefresh, setNeedRefresh],
@@ -299,6 +366,8 @@ function App() {
     return (historySkill === 'all' || session.skillId === historySkill) &&
       (historyCategory === 'all' || session.category === historyCategory) && inPeriod
   })
+  const elbowLeverTransitionAnalysis = selectedSkill?.name === 'Elbow Lever to Handstand'
+  const patternAnalysisMode = freestyleMode || elbowLeverTransitionAnalysis
 
   const chooseSkill = (skill: Skill) => {
     setSelectedSkill(skill)
@@ -476,8 +545,8 @@ function App() {
     const session: TrainingSession = {
       id: crypto.randomUUID(),
       date: new Date().toISOString(),
-      skillId: freestyle ? '' : selectedSkill?.id ?? '',
-      skillName: freestyle ? 'Freestyle' : combo ? comboName || 'Handstand Combo' : selectedSkill?.name ?? 'Unknown skill',
+      skillId: freestyleMode ? '' : selectedSkill?.id ?? '',
+      skillName: freestyleMode ? 'Freestyle' : combo ? comboName || 'Handstand Combo' : selectedSkill?.name ?? 'Unknown skill',
       category: selectedSkill?.category ?? 'handstand',
       report,
       ...(combo ? { combo } : {}),
@@ -516,7 +585,7 @@ function App() {
       await ensurePoseModel()
       analyzerRef.current = selectedSkill ? new SkillAnalyzer(selectedSkill, { targetReps, measureHold, targetHold, focus, positionTolerance, smoothingStrength }) : null
       comboAnalyzerRef.current = comboMode ? new ComboAnalyzer(comboSteps) : null
-      freestyleAnalyzerRef.current = freestyleMode ? new FreestyleAnalyzer() : null
+      freestyleAnalyzerRef.current = patternAnalysisMode ? new FreestyleAnalyzer({ targetElbowLeverToHandstand: elbowLeverTransitionAnalysis }) : null
       setMetrics(initialMetrics)
       setElapsed(0)
       setLandmarks(null)
@@ -632,18 +701,23 @@ function App() {
     setError('')
     setLoading(true)
     setLoadingMessage('Preparing local pose analysis…')
+    uploadedVideoMutedRef.current = video.muted
+    video.muted = true
     try {
       await ensurePoseModel()
       analyzerRef.current = selectedSkill ? new SkillAnalyzer(selectedSkill, { targetReps, measureHold, targetHold, focus, positionTolerance, smoothingStrength }) : null
       comboAnalyzerRef.current = comboMode ? new ComboAnalyzer(comboSteps) : null
-      freestyleAnalyzerRef.current = freestyleMode ? new FreestyleAnalyzer() : null
+      freestyleAnalyzerRef.current = patternAnalysisMode ? new FreestyleAnalyzer({ targetElbowLeverToHandstand: elbowLeverTransitionAnalysis }) : null
       setMetrics(initialMetrics)
       setLandmarks(null)
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA && video.currentTime > 0) video.currentTime = 0
       await video.play()
       inferenceLoop(video, () => video.currentTime)
     } catch (reason) {
       console.error('Uploaded video analysis failed.', reason)
-      setError(`Could not start pose analysis for this video. Check that it is a supported MP4 or WebM and that the local pose assets loaded. ${errorMessage(reason)}`)
+      video.muted = uploadedVideoMutedRef.current
+      uploadedVideoMutedRef.current = null
+      setError(`Could not start pose analysis. Check that the video codec is supported and that the local pose assets loaded. ${errorMessage(reason)}`)
     } finally {
       analysisSetupRef.current = false
       setLoading(false)
@@ -654,6 +728,10 @@ function App() {
   const finishUploadedAnalysis = () => {
     if (!analyzerRef.current && !freestyleAnalyzerRef.current && !comboAnalyzerRef.current) return
     stopInference()
+    const video = uploadRef.current
+    video?.pause()
+    if (video && uploadedVideoMutedRef.current !== null) video.muted = uploadedVideoMutedRef.current
+    uploadedVideoMutedRef.current = null
     void createAndSaveSession(uploadedVideo ?? undefined)
   }
 
@@ -871,11 +949,156 @@ function App() {
   const activeSkill = activeSession ? getSkill(activeSession.skillId) : undefined
   const comboHasManualReview = comboSteps.some((step) => step.kind === 'manual')
   const activeFreestyle = activeSession?.freestyle
+  const skillGoalChecks: GoalCheck[] = activeSession && activeSkill && !activeSession.combo
+    ? (() => {
+      const { report, settings } = activeSession
+      const needsReview = report.insufficientConfidence
+      if (activeSkill.id === 'floorwork-elbow-lever-to-handstand') {
+        const transitions = activeFreestyle?.segments.filter((segment) => segment.kind === 'elbow-lever-to-handstand' && segment.status !== 'unclear') ?? []
+        return [{
+          label: 'Detected transitions',
+          actual: transitions.length,
+          target: settings.targetReps,
+          state: goalStateFor(transitions.length, settings.targetReps, needsReview),
+          detail: 'Counted from estimated transition intervals; review them in the timeline before treating the count as confirmed.',
+          unit: 'reps',
+        }]
+      }
+      const checks: GoalCheck[] = []
+      if (activeSkill.type === 'dynamic') {
+        checks.push({
+          label: 'Completed repetitions',
+          actual: report.validReps,
+          target: settings.targetReps,
+          state: goalStateFor(report.validReps, settings.targetReps, needsReview),
+          detail: 'Compared with the repetition goal saved for this session.',
+          unit: 'reps',
+        })
+      }
+      if (settings.measureHold && (activeSkill.type !== 'dynamic' || activeSkill.id === LUSCHIES_SKILL_ID)) {
+        checks.push({
+          label: 'Longest measured hold',
+          actual: report.longestHold,
+          target: settings.targetHold,
+          state: goalStateFor(report.longestHold, settings.targetHold, needsReview),
+          detail: 'Camera-estimated hold duration; pose tracking cannot confirm balance or contact.',
+          unit: 'seconds',
+        })
+      }
+      return checks
+    })()
+    : []
+  const activeCombo = activeSession?.combo
+  const comboGoalChecks: GoalCheck[] = activeCombo
+    ? [
+      ...activeCombo.segments.map((segment): GoalCheck => {
+        const repeatedType = activeCombo.segments.filter((candidate) => candidate.kind === segment.kind).length > 1
+        const needsReview = (activeSession?.report.insufficientConfidence ?? true) || segment.kind === 'manual'
+        if (segment.kind === 'manual') return {
+          label: segment.name,
+          actual: null,
+          target: null,
+          state: 'review',
+          detail: 'This step needs manual review; the camera does not measure a target for it.',
+          unit: 'reps',
+        }
+        if (repeatedType && (segment.kind === 'press' || segment.kind === 'hspu')) return {
+          label: segment.name,
+          actual: null,
+          target: null,
+          state: 'review',
+          detail: 'Camera cues are aggregate across multiple steps of this type and cannot be assigned to this step. Review and count this step in the video.',
+          unit: 'reps',
+        }
+        if (segment.kind === 'elbow-lever-to-handstand') {
+          const repetitions = segment.detected ? segment.repetitions : 0
+          const check: GoalCheck = {
+            label: segment.name,
+            actual: repetitions,
+            target: segment.targetRepetitions,
+            state: goalStateFor(repetitions, segment.targetRepetitions, needsReview || !segment.detected),
+            detail: segment.detected
+              ? 'Estimated bent-arm support to handstand transitions; elbow contact and press technique are not confirmed.'
+              : 'No qualifying bent-arm support followed by a sustained handstand was detected.',
+            unit: 'reps',
+          }
+          if (segment.targetHoldSeconds > 0) {
+            const holdSeconds = segment.measuredHoldSeconds ?? 0
+            check.secondary = {
+              label: 'Terminal handstand hold',
+              actual: holdSeconds,
+              target: segment.targetHoldSeconds,
+              state: goalStateFor(holdSeconds, segment.targetHoldSeconds, needsReview || !segment.detected),
+              detail: 'Estimated continuous inverted posture following the transition; balance is not verified.',
+              unit: 'seconds',
+            }
+          }
+          return check
+        }
+        if (segment.kind === 'hspu') {
+          const repetitions = segment.detected ? segment.repetitions : 0
+          if (segment.targetRepetitions <= 0) return {
+            label: segment.name,
+            actual: null,
+            target: null,
+            state: 'review',
+            detail: 'No repetition target was set for this step.',
+            unit: 'reps',
+          }
+          return {
+            label: segment.name,
+            actual: repetitions,
+            target: segment.targetRepetitions,
+            state: goalStateFor(repetitions, segment.targetRepetitions, needsReview),
+            detail: segment.detected ? 'Estimated completed inverted movement cycles allocated to this step in combo order.' : 'No reliable cycle was detected for this step.',
+            unit: 'reps',
+          }
+        }
+        if (segment.kind === 'hold') {
+          if (segment.targetHoldSeconds <= 0) return {
+            label: segment.name,
+            actual: null,
+            target: null,
+            state: 'review',
+            detail: 'No hold-time target was set for this step.',
+            unit: 'seconds',
+          }
+          const duration = segment.detected ? Math.max(0, segment.end - segment.start) : 0
+          return {
+            label: segment.name,
+            actual: duration,
+            target: segment.targetHoldSeconds,
+            state: goalStateFor(duration, segment.targetHoldSeconds, needsReview || !segment.detected),
+            detail: 'Estimated hold interval allocated to this step in combo order; not proof of balance.',
+            unit: 'seconds',
+          }
+        }
+        if (segment.targetRepetitions <= 0) return {
+          label: segment.name,
+          actual: null,
+          target: null,
+          state: 'review',
+          detail: 'No repetition target was set for this step.',
+          unit: 'reps',
+        }
+        const hasSingleCue = segment.detected ? 1 : 0
+        return {
+          label: segment.name,
+          actual: hasSingleCue,
+          target: segment.targetRepetitions,
+          state: goalStateFor(hasSingleCue, segment.targetRepetitions, needsReview),
+          detail: segment.detected ? 'A transition cue was estimated; the camera cannot verify press technique.' : 'No transition cue was confidently detected.',
+          unit: 'reps',
+        }
+      }),
+    ]
+    : []
+  const comboStepGoalChecks = comboGoalChecks
   const reportLimitations = activeSession
     ? activeSession.report.limitations ?? ['This saved report predates detailed measurement limits. Treat 2D pose scores as estimates, not verified exercise recognition.']
     : []
   const recentSkillSessions = activeSession
-    ? sessions.filter((session) => !session.combo && !session.freestyle && session.skillId === activeSession.skillId && session.id !== activeSession.id).slice(0, 3)
+    ? sessions.filter((session) => session.skillId !== '' && !session.combo && session.skillId === activeSession.skillId && session.id !== activeSession.id).slice(0, 3)
     : []
 
   return (
@@ -923,10 +1146,40 @@ function App() {
 
         {screen === 'home' && (
           <section className="page-content">
-            <div className="welcome-row">
-              <div><div className="eyebrow"><span className="live-dot" /> YOUR PERSONAL MOVEMENT LAB</div><h1>Train with <em>intention.</em></h1><p className="lede">Build strength skill by skill. Your progress, measured on your terms.</p></div>
-              <div className="welcome-actions"><button className="button-primary welcome-action" onClick={() => setScreen('select')}><Plus size={18} /> Start a session <ArrowRight size={16} /></button><button className="button-secondary welcome-action" onClick={() => startFreestyle()}><Sparkles size={17} /> Freestyle</button></div>
-            </div>
+            <section className="camera-hero panel">
+              <div className="camera-hero-copy">
+                <div className="eyebrow"><span className="live-dot" /> CAMERA-POWERED SKILL ANALYSIS</div>
+                <h1>Make every rep <em>visible.</em></h1>
+                <p className="lede">Turn your camera into a movement coach. Track body lines, movement phases and holds — with analysis that stays on your device.</p>
+                <div className="welcome-actions">
+                  <button className="button-primary welcome-action" onClick={() => setScreen('select')}><Video size={17} /> Start camera analysis <ArrowRight size={16} /></button>
+                  <button className="button-secondary welcome-action" onClick={() => startFreestyle()}><Sparkles size={17} /> Freestyle</button>
+                </div>
+                <div className="camera-privacy-note"><ShieldCheck size={15} /> Analysis runs locally on this device</div>
+              </div>
+              <div className="analysis-visual" aria-hidden="true">
+                <div className="analysis-visual-heading"><span><span className="analysis-pulse" /> CAMERA ANALYSIS</span><small>PREVIEW</small></div>
+                <div className="analysis-frame">
+                  <span className="frame-corner corner-top-left" /><span className="frame-corner corner-top-right" />
+                  <span className="frame-corner corner-bottom-left" /><span className="frame-corner corner-bottom-right" />
+                  <div className="analysis-grid-lines" />
+                  <svg className="pose-illustration" viewBox="0 0 220 220" fill="none">
+                    <path className="pose-limb" d="M111 53 111 97 111 137M111 72 81 91 60 119M111 72 143 91 164 118M111 137 86 166 66 191M111 137 137 164 157 190" />
+                    <path className="pose-guide" d="M41 196h138M110 35v164" />
+                    <circle className="pose-joint" cx="111" cy="48" r="10" />
+                    <circle className="pose-joint" cx="111" cy="72" r="4" /><circle className="pose-joint" cx="81" cy="91" r="4" />
+                    <circle className="pose-joint" cx="60" cy="119" r="4" /><circle className="pose-joint" cx="143" cy="91" r="4" />
+                    <circle className="pose-joint" cx="164" cy="118" r="4" /><circle className="pose-joint" cx="111" cy="97" r="4" />
+                    <circle className="pose-joint" cx="111" cy="137" r="4" /><circle className="pose-joint" cx="86" cy="166" r="4" />
+                    <circle className="pose-joint" cx="66" cy="191" r="4" /><circle className="pose-joint" cx="137" cy="164" r="4" />
+                    <circle className="pose-joint" cx="157" cy="190" r="4" />
+                  </svg>
+                  <span className="visual-tag tag-pose"><Activity size={12} /> POSE LANDMARKS</span>
+                  <span className="visual-tag tag-line"><span className="tag-line-mark" /> BODY LINE</span>
+                  <span className="analysis-frame-caption">Illustrative pose tracking preview</span>
+                </div>
+              </div>
+            </section>
             <div className="stat-grid">
               <StatCard label="Sessions logged" value={String(sessions.length).padStart(2, '0')} note="On this device" icon={<Dumbbell size={18} />} />
               <StatCard label="Best technique score" value={bestScore ? `${bestScore}` : '—'} suffix={bestScore ? '/ 100' : ''} note={bestScore ? 'Across analyzed sessions' : 'Complete your first analysis'} icon={<Sparkles size={18} />} />
@@ -940,12 +1193,15 @@ function App() {
                 </div> : <EmptyState title="Your training starts here" text="Run your first skill analysis to build a personal progress timeline." action="Choose a skill" onClick={() => setScreen('select')} />}
                 {sessions.some((session) => session.report.score !== null) && <ScoreTrend sessions={sessions} language={language} />}
               </section>
-              <section className="panel spotlight-panel">
-                <div className="eyebrow">BUILT FOR YOUR NEXT REP</div><h2>One camera.<br /><em>Better awareness.</em></h2>
-                <p>Get a consistent view of body-line alignment, movement phases and hold time — right from your phone.</p>
-                <div className="spotlight-stats"><div><Activity size={16} /><span>Pose tracking</span></div><div><ShieldCheck size={16} /><span>Private by design</span></div></div>
+              <section className="panel camera-checks-panel">
+                <div className="eyebrow">YOUR CAMERA, CLEARER CUES</div>
+                <h2>What the analysis looks for</h2>
+                <div className="camera-check-list">
+                  <div><span>01</span><div><strong>Body alignment</strong><small>See how your body line holds up</small></div><Activity size={17} /></div>
+                  <div><span>02</span><div><strong>Movement phases</strong><small>Review the shape of each rep</small></div><Video size={17} /></div>
+                  <div><span>03</span><div><strong>Holds &amp; control</strong><small>Track technique-qualified hold time</small></div><Clock3 size={17} /></div>
+                </div>
                 <button className="spotlight-link" onClick={() => setScreen('select')}>Explore skill library <ArrowRight size={16} /></button>
-                <div className="spotlight-orbit orbit-one" /><div className="spotlight-orbit orbit-two" /><div className="spotlight-core"><Activity size={38} /></div>
               </section>
             </div>
             <div className="section-heading"><div><div className="eyebrow">PICK UP WHERE YOU LEFT OFF</div><h2>Explore progressions</h2></div><button className="text-button" onClick={() => setScreen('select')}>All skills <ArrowRight size={15} /></button></div>
@@ -958,10 +1214,12 @@ function App() {
             <div className="page-heading"><div><div className="eyebrow">BUILD YOUR SESSION</div><h1>Choose your <em>skill.</em></h1><p className="lede">Select a specific progression before recording. Each skill has its own movement checks.</p></div></div>
             <section className="combo-builder panel">
               <div className="panel-heading"><div><div className="eyebrow">HANDSTAND COMBO ANALYZER</div><h2>Build a flowing sequence</h2></div><button className="button-secondary" onClick={() => setComboEditorOpen((open) => !open)}>{comboEditorOpen ? 'Close editor' : 'Edit combo'}</button></div>
-              <p className="combo-intro">Arrange press entries, handstand holds and handstand push-ups. Pose-based transitions are estimates and can be reviewed after recording.</p>
+              <p className="combo-intro">Arrange press entries, Elbow Lever to Handstand transitions, handstand holds and handstand push-ups. Pose-based transitions are estimates and can be reviewed after recording.</p>
               {comboEditorOpen && <div className="combo-step-list">
                 {comboSteps.map((step, index) => {
-                  const options = skills.filter((skill) => step.kind === 'press'
+                  const options = skills.filter((skill) => step.kind === 'elbow-lever-to-handstand'
+                    ? skill.name === 'Elbow Lever to Handstand'
+                    : step.kind === 'press'
                     ? skill.category === 'bent-arm-press' || skill.name === 'Handstand Kick-Up' || skill.name.includes('Press to Handstand') || skill.id === LUSCHIES_SKILL_ID
                     : step.kind === 'hold'
                       ? skill.category === 'handstand' && skill.type !== 'dynamic'
@@ -969,16 +1227,27 @@ function App() {
                   return <div className="combo-step-editor panel" key={step.id}>
                     <div className="combo-step-number">{String(index + 1).padStart(2, '0')}</div>
                     <div className="combo-step-fields">
-                      <label>Element<select value={step.name} onChange={(event) => setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, name: event.target.value } : item))}>
+                      <label>Element<select value={step.name} onChange={(event) => {
+                        const selectedName = event.target.value
+                        const selectedSkill = skills.find((skill) => skill.name === selectedName)
+                        const kind: ComboStepKind | undefined = selectedSkill?.name === 'Elbow Lever to Handstand'
+                          ? 'elbow-lever-to-handstand'
+                          : selectedSkill && (selectedSkill.category === 'bent-arm-press' || selectedSkill.id === LUSCHIES_SKILL_ID)
+                            ? 'press'
+                            : selectedSkill?.category === 'handstand-push-up'
+                              ? 'hspu'
+                              : selectedSkill?.category === 'handstand' && selectedSkill.type !== 'dynamic' ? 'hold' : undefined
+                        setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, name: selectedName, ...(kind ? { kind } : {}) } : item))
+                      }}>
                         <option value={step.name}>{step.name}</option>
                         {options.filter((option) => option.name !== step.name).map((option) => <option key={option.id} value={option.name}>{option.name}</option>)}
                       </select></label>
                       <label>Type<select value={step.kind} onChange={(event) => {
                         const kind = event.target.value as ComboStepKind
                         setComboSteps((previous) => previous.map((item) => item.id === step.id ? {
-                          ...item, kind, name: kind === 'press' ? 'Press to handstand' : kind === 'hold' ? 'Handstand hold' : kind === 'manual' ? 'Manual review' : 'Handstand Push-ups',
+                          ...item, kind, name: kind === 'press' ? 'Press to handstand' : kind === 'hold' ? 'Handstand hold' : kind === 'manual' ? 'Manual review' : kind === 'elbow-lever-to-handstand' ? 'Elbow Lever to Handstand' : 'Handstand Push-ups',
                         } : item))
-                      }}><option value="press">Press to handstand</option><option value="hold">Handstand hold</option><option value="hspu">Handstand push-ups</option></select></label>
+                      }}><option value="press">Press to handstand</option><option value="hold">Handstand hold</option><option value="hspu">Handstand push-ups</option><option value="elbow-lever-to-handstand">Elbow Lever to Handstand</option></select></label>
                       <label>Reps<input aria-label={`Repetitions for step ${index + 1}`} type="number" min="1" max="50" value={step.repetitions} onChange={(event) => setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, repetitions: Math.max(1, Math.min(50, Number(event.target.value) || 1)) } : item))} /></label>
                       <label>Hold (sec)<input aria-label={`Hold time for step ${index + 1}`} type="number" min="0" max="300" value={step.holdSeconds} onChange={(event) => setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, holdSeconds: Math.max(0, Math.min(300, Number(event.target.value) || 0)) } : item))} /></label>
                       <label className="combo-description">Description (optional)<input value={step.description} maxLength={120} placeholder="Short cue for this element" onChange={(event) => setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, description: event.target.value } : item))} /></label>
@@ -1025,7 +1294,7 @@ function App() {
 
         {screen === 'session' && selectedSkill && (
           <section className="page-content session-page">
-            <div className="page-heading compact-heading">            <div><button className="back-link" onClick={() => navigateTo(freestyleMode ? 'home' : 'select')}>← {freestyleMode ? 'Overview' : comboMode ? 'Combo editor' : 'Skill library'}</button><div className="eyebrow">{freestyleMode ? 'FREESTYLE · CONTINUOUS LOCAL POSE ANALYSIS' : comboMode ? t('COMBO · LOCAL POSE ANALYSIS') : `${selectedSkill.categoryName.toUpperCase()} · LEVEL ${selectedSkill.level}`}</div><h1>{freestyleMode ? 'Move freely' : comboMode ? 'Record your combo' : selectedSkill.name}</h1><p className="lede">{freestyleMode ? 'No exercise selection needed. Record a sequence and review only the pose patterns supported by the current model.' : comboMode ? comboHasManualReview ? t('Record your sequence. The current model estimates handstand entry, hold and push-up cues only; other skills need manual timeline review.') : 'Perform the sequence in order. The camera estimates entry, hold and push-up phases; uncertain transitions remain unconfirmed.' : selectedSkill.description}</p></div></div>
+            <div className="page-heading compact-heading">            <div><button className="back-link" onClick={() => navigateTo(freestyleMode ? 'home' : 'select')}>← {freestyleMode ? 'Overview' : comboMode ? 'Combo editor' : 'Skill library'}</button><div className="eyebrow">{freestyleMode ? 'FREESTYLE · CONTINUOUS LOCAL POSE ANALYSIS' : comboMode ? t('COMBO · LOCAL POSE ANALYSIS') : `${selectedSkill.categoryName.toUpperCase()} · LEVEL ${selectedSkill.level}`}</div><h1>{freestyleMode ? 'Move freely' : comboMode ? 'Record your combo' : selectedSkill.name}</h1><p className="lede">{freestyleMode ? 'No exercise selection needed. Record a sequence and review only the pose patterns supported by the current model.' : comboMode ? t('Combo analysis estimates handstand entry, hold, push-up cycles and Elbow Lever to Handstand transitions; other skills need manual timeline review.') : selectedSkill.description}</p></div></div>
             <div className="session-layout">
               <div className="session-left">
                 <div className="camera-stage">
@@ -1041,9 +1310,9 @@ function App() {
                   {countdown > 0 && <div className="countdown-overlay"><span>GET READY</span><strong>{countdown}</strong></div>}
                   {paused && <div className="paused-overlay"><span>RECORDING PAUSED</span></div>}
                   {recording && <div className="recording-clock"><span className="recording-dot" /> REC&nbsp; {formatTime(elapsed)}</div>}
-                  {analysisRunning && <div className="live-metric-chip">{freestyleMode ? <><span>POSE PATTERN · REPS</span><strong>{metrics.confidence < 0.45 ? 'UNCLEAR' : metrics.validReps}</strong></> : comboMode ? <><span>{t('HANDSTAND CUES · EST.')}</span><strong>{metrics.validReps} · {formatTime(metrics.currentHold)}</strong></> : selectedSkill.id === LUSCHIES_SKILL_ID ? <><span>{t('LUSCHIESS SKILL · PHASE')}</span><strong>{metrics.phaseLabel ? t(metrics.phaseLabel) : t('Waiting for kneeling pose')} · {metrics.validReps}/{targetReps} {t('reps')}</strong></> : selectedSkill.type === 'dynamic' ? <><span>REPS</span><strong>{metrics.validReps}</strong></> : <><span>HOLD</span><strong>{formatTime(metrics.currentHold)}</strong></>}</div>}
+                  {analysisRunning && <div className="live-metric-chip">{patternAnalysisMode ? <><span>POSE PATTERN · REPS</span><strong>{metrics.confidence < 0.45 ? 'UNCLEAR' : metrics.validReps}</strong></> : comboMode ? <><span>{t('HANDSTAND CUES · EST.')}</span><strong>{metrics.validReps} · {formatTime(metrics.currentHold)}</strong></> : selectedSkill.id === LUSCHIES_SKILL_ID ? <><span>{t('LUSCHIESS SKILL · PHASE')}</span><strong>{metrics.phaseLabel ? t(metrics.phaseLabel) : t('Waiting for kneeling pose')} · {metrics.validReps}/{targetReps} {t('reps')}</strong></> : selectedSkill.type === 'dynamic' ? <><span>REPS</span><strong>{metrics.validReps}</strong></> : <><span>HOLD</span><strong>{formatTime(metrics.currentHold)}</strong></>}</div>}
                 </div>
-                {analysisRunning && metrics.confidence < 0.3 && <div className="perspective-warning" role="status"><CircleAlert size={15} /><span>{freestyleMode ? 'Too few visible body landmarks for useful freestyle analysis. Improve lighting and keep your full body in frame.' : `Pose landmarks are difficult to read. Adjust lighting and framing; recommended view: ${selectedSkill.camera}`}</span></div>}
+                {analysisRunning && metrics.confidence < 0.3 && <div className="perspective-warning" role="status"><CircleAlert size={15} /><span>{patternAnalysisMode ? 'Too few visible body landmarks for useful movement-pattern analysis. Improve lighting and keep your full body in frame.' : `Pose landmarks are difficult to read. Adjust lighting and framing; recommended view: ${selectedSkill.camera}`}</span></div>}
                 <div className="camera-controls">
                   {mediaMode === 'camera' ? <>
                     <button className="camera-switch" onClick={() => void startCamera(cameraFacing === 'environment' ? 'user' : 'environment')} disabled={!cameraActive || recording || loading}><RotateCcw size={16} /> Flip camera</button>
@@ -1052,19 +1321,19 @@ function App() {
                         : <div className="record-buttons">{paused ? <button className="button-primary" onClick={resumeRecording}><Play size={15} /> Resume</button> : <button className="button-secondary" onClick={pauseRecording}><span className="pause-symbol" /> Pause</button>}<button className="button-danger" onClick={stopRecording}><Square size={14} fill="currentColor" /> {freestyleMode ? 'Stop Freestyle' : 'Finish'}</button></div>}
                     <button className="upload-inline" onClick={() => fileInputRef.current?.click()} disabled={recording || loading}><Upload size={16} /> Upload</button>
                   </> : <>
-                    <button className="camera-switch" onClick={() => { setMediaMode('camera'); setUploadedVideo(null) }} disabled={loading}><Video size={16} /> Use camera</button>
+                    <button className="camera-switch" onClick={() => { setMediaMode('camera'); setUploadedVideo(null) }} disabled={loading || analysisRunning}><Video size={16} /> Use camera</button>
                     <button className="button-primary" onClick={() => analysisRunning ? finishUploadedAnalysis() : void analyzeUploadedVideo()} disabled={loading || !uploadedUrl}>{loading ? <><span className="spinner" />{loadingMessage}</> : analysisRunning ? <><Square size={14} fill="currentColor" /> Finish analysis</> : <><Activity size={16} /> Analyze video</>}</button>
-                    <button className="upload-inline" onClick={() => fileInputRef.current?.click()} disabled={loading}><Upload size={16} /> Replace</button>
+                    <button className="upload-inline" onClick={() => fileInputRef.current?.click()} disabled={loading || analysisRunning}><Upload size={16} /> Replace</button>
                   </>}
                   <input ref={fileInputRef} type="file" accept="video/*" hidden onChange={(event) => { selectVideo(event.target.files?.[0]); event.target.value = '' }} />
                 </div>
-                {analysisRunning && <div className="live-readout"><div><span>POSE CONFIDENCE</span><strong>{Math.round(metrics.confidence * 100)}%{freestyleMode && metrics.confidence < 0.45 ? ' · LOW' : ''}</strong></div><div><span>{freestyleMode ? 'VISIBLE REP PATTERNS' : comboMode || selectedSkill.type === 'dynamic' ? 'COMPLETED REPS' : 'LONGEST HOLD'}</span><strong>{freestyleMode || comboMode || selectedSkill.type === 'dynamic' ? metrics.validReps : formatTime(metrics.longestHold)}</strong></div><div><span>{comboMode || freestyleMode ? 'ESTIMATED HOLD TIME' : 'VALID HOLD TIME'}</span><strong>{formatTime(metrics.totalHold)}</strong></div></div>}
+                {analysisRunning && <div className="live-readout"><div><span>POSE CONFIDENCE</span><strong>{Math.round(metrics.confidence * 100)}%{patternAnalysisMode && metrics.confidence < 0.45 ? ' · LOW' : ''}</strong></div><div><span>{patternAnalysisMode ? 'VISIBLE REP PATTERNS' : comboMode || selectedSkill.type === 'dynamic' ? 'COMPLETED REPS' : 'LONGEST HOLD'}</span><strong>{patternAnalysisMode || comboMode || selectedSkill.type === 'dynamic' ? metrics.validReps : formatTime(metrics.longestHold)}</strong></div><div><span>{comboMode || patternAnalysisMode ? 'ESTIMATED HOLD TIME' : 'VALID HOLD TIME'}</span><strong>{formatTime(metrics.totalHold)}</strong></div></div>}
                 <div className="camera-note"><ShieldCheck size={16} /><span>Video analysis runs locally on this device. No video is uploaded.</span></div>
               </div>
               <aside className="session-right">
-                <section className="panel setup-panel"><div className="panel-heading"><div><div className="eyebrow">{freestyleMode ? 'FREESTYLE MODE' : comboMode ? 'COMBO ORDER' : 'SESSION SETUP'}</div><h2>{freestyleMode ? 'Automatic pattern scan' : comboMode ? 'Planned sequence' : 'Make it yours'}</h2></div></div>
-                  {freestyleMode ? <><p className="freestyle-description">Freestyle starts without selecting a skill or planned combo, so you can move through skills in any order. The local model estimates broad pose patterns; review and label any library skill or combo in the timeline.</p>{freestylePrompt && <p className="freestyle-reference"><strong>{t('Reference sequence only')}:</strong> {t(freestylePrompt)}. {t('Freestyle does not enforce this order.')}</p>}<ul className="freestyle-support-list"><li>Handstand holds and visible HSPU elbow cycles</li><li>{t('Kneeling-start to handstand pose sequence (estimated)')}</li><li>Elbow-lever-like support to handstand (estimated)</li><li>Horizontal front-lever-like body positions</li><li>Horizontal push-up patterns and elbow cycles</li></ul><div className="disclaimer"><CircleAlert size={15} /><p>All skill names and combo names are available for manual timeline labels; this does not make every movement automatically recognizable. Press intent, push-up variations, wall contact, pull-ups and muscle-ups are not reliably identifiable from these landmarks alone. Unclassified periods are labeled unknown, not guessed.</p></div></>
-                    : comboMode ? <><p className="freestyle-reference">{comboName}</p><ol className="combo-session-order">{comboSteps.map((step) => <li key={step.id}><span>{t(comboKindNames[step.kind])}</span><strong>{step.name}</strong><small>{`${step.repetitions} rep${step.repetitions === 1 ? '' : 's'}${step.holdSeconds > 0 ? ` · ${step.holdSeconds}s hold` : ''}${step.description ? ` · ${step.description}` : ''}`}</small></li>)}</ol><div className="disclaimer"><CircleAlert size={15} /><p>{comboHasManualReview ? t('Only handstand cues are estimated automatically. Every other element is kept in the plan for manual timing and confirmation in the report.') : 'Automatic labels are estimates. The final timeline asks for confirmation where pose cues are ambiguous.'}</p></div></>
+                <section className="panel setup-panel"><div className="panel-heading"><div><div className="eyebrow">{freestyleMode ? 'FREESTYLE MODE' : comboMode ? 'COMBO ORDER' : elbowLeverTransitionAnalysis ? 'CAMERA-ASSISTED ANALYSIS' : 'SESSION SETUP'}</div><h2>{freestyleMode ? 'Automatic pattern scan' : comboMode ? 'Planned sequence' : elbowLeverTransitionAnalysis ? 'Elbow Lever to Handstand' : 'Make it yours'}</h2></div></div>
+                  {patternAnalysisMode ? <>{freestyleMode ? <><p className="freestyle-description">Freestyle starts without selecting a skill or planned combo, so you can move through skills in any order. The local model estimates broad pose patterns; review and label any library skill or combo in the timeline.</p>{freestylePrompt && <p className="freestyle-reference"><strong>{t('Reference sequence only')}:</strong> {t(freestylePrompt)}. {t('Freestyle does not enforce this order.')}</p>}<ul className="freestyle-support-list"><li>Handstand holds and visible HSPU elbow cycles</li><li>{t('Kneeling-start to handstand pose sequence (estimated)')}</li><li>Elbow-lever-like support to handstand (estimated)</li><li>Horizontal front-lever-like body positions</li><li>Horizontal push-up patterns and elbow cycles</li></ul></> : <><p className="freestyle-description">The camera estimates a bent-arm horizontal support followed by an inverted position. It cannot confirm elbow contact or prove that the transition was a controlled press.</p><ul className="freestyle-support-list"><li>Keep your whole body, hands and elbows visible</li><li>Use a side or slightly angled view</li><li>Review the estimated interval and timing in the report</li></ul></>}<div className="disclaimer"><CircleAlert size={15} /><p>{freestyleMode ? 'All skill names and combo names are available for manual timeline labels; this does not make every movement automatically recognizable. Press intent, push-up variations, wall contact, pull-ups and muscle-ups are not reliably identifiable from these landmarks alone. Unclassified periods are labeled unknown, not guessed.' : 'This is an estimated 2D pose pattern, not validated recognition. Similar bent-arm transitions may look alike to the camera; confirm the interval against your video.'}</p></div></>
+                    : comboMode ? <><p className="freestyle-reference">{comboName}</p><ol className="combo-session-order">{comboSteps.map((step) => <li key={step.id}><span>{t(comboKindNames[step.kind])}</span><strong>{step.name}</strong><small>{`${step.repetitions} rep${step.repetitions === 1 ? '' : 's'}${step.holdSeconds > 0 ? ` · ${step.holdSeconds}s hold` : ''}${step.description ? ` · ${step.description}` : ''}`}</small></li>)}</ol><div className="disclaimer"><CircleAlert size={15} /><p>{comboHasManualReview ? t('Handstand and Elbow Lever to Handstand cues are estimated automatically. Other elements remain available for manual timing and confirmation in the report.') : 'Automatic labels are estimates. The final timeline asks for confirmation where pose cues are ambiguous.'}</p></div></>
                     : <>
                   {selectedSkill.type === 'dynamic' && <div className="form-row"><label htmlFor="target-reps">Rep target</label><div className="number-control"><button onClick={() => setTargetReps(Math.max(1, targetReps - 1))} aria-label="Decrease rep target">−</button><input id="target-reps" type="number" min="1" max="50" value={targetReps} onChange={(event) => setTargetReps(Math.min(50, Math.max(1, Number(event.target.value) || 1)))} /><button onClick={() => setTargetReps(Math.min(50, targetReps + 1))} aria-label="Increase rep target">+</button></div></div>}
                   {(selectedSkill.type !== 'dynamic' || selectedSkill.id === LUSCHIES_SKILL_ID) && <><label className="toggle-row"><span><strong>Measure valid holds</strong><small>Track only time in a qualified position</small></span><input type="checkbox" checked={measureHold} onChange={(event) => setMeasureHold(event.target.checked)} /><i /></label>
@@ -1085,8 +1354,18 @@ function App() {
         {screen === 'report' && activeSession && (
           <section className="page-content report-page">
             <div className="report-top"><div><button className="back-link" onClick={showHistory}>← Training log</button><div className="eyebrow">SESSION COMPLETE · {new Date(activeSession.date).toLocaleDateString(locale, { dateStyle: 'medium' })}</div><h1>{activeSession.skillName}</h1><p className="lede">Your analysis is ready. Treat 2D estimates as training feedback, not a precise biomechanical measurement.</p>{activeSession.freestyle ? <p className="report-settings">{formatTime(activeSession.freestyle.duration)} duration · {activeSession.freestyle.segments.length} analyzed intervals · {activeSession.freestyle.reliableRepetitions} higher-confidence repetitions</p> : activeSession.combo ? <p className="report-settings">Sequence of {activeSession.combo.segments.length} planned steps · {formatTime(activeSession.combo.duration)} recording duration · local analysis</p> : <p className="report-settings">{activeSkill?.id === LUSCHIES_SKILL_ID ? `${activeSession.settings.targetReps} rep target · ${activeSession.settings.measureHold ? `${activeSession.settings.targetHold}s hold target` : 'hold timer off'} · kneeling-to-handstand cycles · 2D phase estimates` : `${activeSkill?.type === 'dynamic' ? `${activeSession.settings.targetReps} rep target · ` : ''}${activeSession.settings.measureHold ? `${activeSession.settings.targetHold}s hold target · ±${activeSession.settings.positionTolerance}° tolerance` : 'hold timer off'} · ${activeSession.settings.smoothingStrength}% smoothing`}{activeSession.settings.focus ? ` · Focus: ${activeSession.settings.focus}` : ''}</p>}</div><button className="button-primary" onClick={resetWorkflow}><RotateCcw size={16} /> Analyze again</button></div>
-            <div className="analysis-context panel"><div><span className="eyebrow">{activeSession.freestyle ? 'AUTOMATIC FREESTYLE SCAN' : activeSession.combo ? 'COMBO SEQUENCE' : 'SELECTED EXERCISE'}</span><strong>{activeSession.skillName}</strong><small>{activeSession.freestyle ? activeSession.freestyle.note : activeSession.combo ? 'Each step is estimated from pose cues, not independently recognized.' : `${activeSkill?.categoryName ?? 'Calisthenics'} · Level ${activeSkill?.level ?? '—'} · Exercise identity is selected, not independently recognized by the camera.`}</small></div>{activeSkill && !activeSession.freestyle && <p><Video size={15} /> Recommended view: {activeSkill.camera}</p>}</div>
+            <div className="analysis-context panel"><div><span className="eyebrow">{activeSession.freestyle ? activeSession.skillId ? 'AUTOMATIC TRANSITION SCAN · ESTIMATED' : 'AUTOMATIC FREESTYLE SCAN' : activeSession.combo ? 'COMBO SEQUENCE' : 'SELECTED EXERCISE'}</span><strong>{activeSession.skillName}</strong><small>{activeSession.freestyle ? activeSession.freestyle.note : activeSession.combo ? 'Each step is estimated from pose cues, not independently recognized.' : `${activeSkill?.categoryName ?? 'Calisthenics'} · Level ${activeSkill?.level ?? '—'} · Exercise identity is selected, not independently recognized by the camera.`}</small></div>{activeSkill && <p><Video size={15} /> Recommended view: {activeSkill.camera}</p>}</div>
             {activeSession.report.insufficientConfidence && <div className="confidence-alert"><CircleAlert size={18} /><div><strong>Not enough reliable pose evidence for a score</strong><span>Check lighting and framing. Recommended view: {activeSkill?.camera ?? 'keep the full body visible'}. No score was invented.</span></div></div>}
+            {skillGoalChecks.length > 0 && <section className="goal-results panel">
+              <div className="panel-heading"><div><div className="eyebrow">GOAL CHECK · CAMERA ESTIMATE</div><h2>Skill target</h2></div><span className="goal-summary">{skillGoalChecks.every((check) => check.state === 'met') ? 'Estimated target reached' : skillGoalChecks.some((check) => check.state === 'review') ? 'Evidence needs review' : 'Target not yet reached / detected'}</span></div>
+              <div className="goal-check-grid">{skillGoalChecks.map((check) => <GoalResultCard key={check.label} check={check} language={language} />)}</div>
+              <p className="goal-disclaimer">These are estimates from camera pose data, not proof of skill identity or technique quality. Review the video, especially when a target appears reached.</p>
+            </section>}
+            {activeSession.combo && comboGoalChecks.length > 0 && <section className="goal-results panel">
+              <div className="panel-heading"><div><div className="eyebrow">GOAL CHECK · CAMERA ESTIMATE</div><h2>Combo goals by skill</h2></div><span className="goal-summary">{comboStepGoalChecks.filter((check) => goalCheckState(check) === 'met').length} {t('estimated reached')} · {comboStepGoalChecks.filter((check) => goalCheckState(check) === 'not-met').length} {t('not detected')} · {comboStepGoalChecks.filter((check) => goalCheckState(check) === 'review').length} {t('need review')}</span></div>
+              <div className="goal-check-grid">{comboStepGoalChecks.map((check, index) => <GoalResultCard key={`${index}-${check.label}`} check={check} language={language} />)}</div>
+              <p className="goal-disclaimer">A detected cue or duration is only an estimate. Manual steps and low-confidence results are not counted as confirmed goals.</p>
+            </section>}
             <div className="report-summary">
               <div className="score-card panel"><div className="eyebrow">{activeSession.freestyle ? 'TECHNIQUE SCORE' : activeSession.combo ? 'VALIDATED SCORE' : 'TECHNIQUE SCORE'}</div><div className={`score-number ${activeSession.report.score === null ? 'no-score' : ''}`}>{activeSession.report.score ?? '—'}<small>{activeSession.report.score !== null && '/100'}</small></div><div className="score-caption">{activeSession.freestyle ? 'No overall score; inspect per-segment cues' : activeSession.combo ? 'No validated combo score is produced' : activeSkill?.id === LUSCHIES_SKILL_ID ? 'No validated technique score; review phase cues' : activeSession.report.score === null ? 'Insufficient confidence' : 'Estimated from visible pose frames'}</div><div className="score-bar"><i style={{ width: `${activeSession.report.score ?? 0}%` }} /></div><div className="score-foot"><span>POSE CONFIDENCE</span><strong>{activeSession.report.confidence}%</strong></div></div>
               <div className="result-metrics panel">
@@ -1112,7 +1391,7 @@ function App() {
               </div>
               {activeSession.video && videoUrl && <div className="report-video panel"><div className="panel-heading"><div><div className="eyebrow">SESSION RECORDING</div><h2>Review your movement</h2></div></div><video ref={reportVideoRef} controls playsInline src={videoUrl} /></div>}
             </div>
-            {activeFreestyle && <section className="combo-timeline panel freestyle-timeline"><div className="panel-heading"><div><div className="eyebrow">FREESTYLE TIMELINE · {formatTime(activeFreestyle.duration)}</div><h2>Detected patterns</h2></div><div className="freestyle-timeline-actions"><span className="combo-order-status">{activeFreestyle.framesAnalyzed < 12 ? 'Insufficient camera evidence' : `${activeFreestyle.segments.length} intervals · no overall score`}</span><button className="button-secondary" onClick={addFreestyleSegment}><Plus size={14} /> Add interval</button></div></div>
+            {activeFreestyle && <section className="combo-timeline panel freestyle-timeline"><div className="panel-heading"><div><div className="eyebrow">{activeSession.skillId ? 'TRANSITION TIMELINE' : 'FREESTYLE TIMELINE'} · {formatTime(activeFreestyle.duration)}</div><h2>Detected patterns</h2></div><div className="freestyle-timeline-actions"><span className="combo-order-status">{activeFreestyle.framesAnalyzed < 12 ? 'Insufficient camera evidence' : `${activeFreestyle.segments.length} intervals · no overall score`}</span><button className="button-secondary" onClick={addFreestyleSegment}><Plus size={14} /> Add interval</button></div></div>
             <datalist id="freestyle-label-options">{freestyleLabelOptions.map((label) => <option key={label} value={label} />)}</datalist>
               {activeFreestyle.framesAnalyzed < 12 && activeFreestyle.segments.length === 0 && <p className="combo-intro">The camera did not provide enough confident pose frames. The timeline is intentionally empty rather than guessing skills.</p>}
               {(activeFreestyle.framesAnalyzed >= 12 || activeFreestyle.segments.length > 0) && <><p className="combo-intro">{activeFreestyle.framesAnalyzed < 12 ? 'Only a few clear intervals were found; treat them as unconfirmed and review manually. ' : ''}{activeFreestyle.note}</p>{activeFreestyle.segments.length === 0 && <p className="combo-intro">No supported movement pattern was found in this recording. This does not mean no exercise occurred; review the video or add an interval manually.</p>}<div className="timeline-track" aria-label="Freestyle movement timeline">{activeFreestyle.segments.map((segment, index) => <button key={segment.id} className={`timeline-block ${segment.status === 'unclear' ? 'uncertain' : 'detected'} ${selectedFreestyleSegment === segment.id ? 'active' : ''}`} style={{ left: `${activeFreestyle.duration ? segment.start / activeFreestyle.duration * 100 : 0}%`, width: `${activeFreestyle.duration ? Math.max(1, (segment.end - segment.start) / activeFreestyle.duration * 100) : 1}%` }} onClick={() => { setSelectedFreestyleSegment(segment.id); if (reportVideoRef.current) reportVideoRef.current.currentTime = segment.start }} title={`${segment.name}: ${formatTime(segment.start)}–${formatTime(segment.end)}`}>{index + 1}</button>)}</div>
@@ -1124,13 +1403,14 @@ function App() {
                   <small className="freestyle-segment-stats">{segment.repetitions ? `${segment.repetitions} repetitions · ` : ''}{segment.partialRepetitions ? `${segment.partialRepetitions} partial · ` : ''}{segment.holdSeconds > 0 ? `${formatTime(segment.holdSeconds)} estimated hold` : 'no static hold measured'}</small>
                 </div>)}</div></>}
             </section>}
-            {activeSession.combo && <section className="combo-timeline panel"><div className="panel-heading"><div><div className="eyebrow">COMBO TIMELINE · {formatTime(activeSession.combo.duration)}</div><h2>Review and correct each segment</h2></div><span className="combo-order-status">{activeSession.combo.sequenceFollowed === null ? 'Order not verifiable' : activeSession.combo.sequenceFollowed ? 'Estimated order matches' : 'Order differs or is incomplete'}</span></div>
+            {activeSession.combo && <section className="combo-timeline panel">            <div className="panel-heading"><div><div className="eyebrow">COMBO TIMELINE · {formatTime(activeSession.combo.duration)}</div><h2>Your combo, step by step</h2></div><span className="combo-order-status">{activeSession.combo.sequenceFollowed === null ? 'Order not verifiable' : activeSession.combo.sequenceFollowed ? 'Estimated order matches' : 'Order differs or is incomplete'}</span></div>
               <p className="combo-intro">{activeSession.combo.note}</p>
               <div className="timeline-track" aria-label="Detected combo timeline">{activeSession.combo.segments.map((segment, index) => <button key={segment.stepId} className={`timeline-block ${segment.detected ? 'detected' : 'uncertain'} ${selectedTimelineStep === segment.stepId ? 'active' : ''}`} style={{ left: `${activeSession.combo?.duration ? segment.start / activeSession.combo.duration * 100 : 0}%`, width: `${activeSession.combo?.duration ? Math.max(1, (segment.end - segment.start) / activeSession.combo.duration * 100) : 1}%` }} onClick={() => { setSelectedTimelineStep(segment.stepId); if (reportVideoRef.current) reportVideoRef.current.currentTime = segment.start }} title={`${segment.name}: ${formatTime(segment.start)}–${formatTime(segment.end)}`}>{index + 1}</button>)}</div>
               <div className="timeline-legend"><span><i className="timeline-key detected" />Estimated pose cue</span><span><i className="timeline-key uncertain" />Unconfirmed / not detected</span><span>Click a segment to seek the recording</span></div>
               <div className="timeline-segments">{activeSession.combo.segments.map((segment, index) => <div className={`timeline-segment ${selectedTimelineStep === segment.stepId ? 'selected' : ''}`} key={segment.stepId}>
                 <div className="timeline-segment-heading"><span>{String(index + 1).padStart(2, '0')}</span><div><strong>{segment.name}</strong><small>{segment.confirmed ? 'Manually confirmed' : segment.detected ? `Estimated · ${segment.kind === 'hspu' ? `${segment.repetitions}/${segment.targetRepetitions} cycles` : `${formatTime(Math.max(0, segment.end - segment.start))} segment`}` : 'Unclear · manual confirmation needed'}</small></div><button className="button-secondary" onClick={() => { setSelectedTimelineStep(segment.stepId); if (reportVideoRef.current) reportVideoRef.current.currentTime = segment.start }}>View</button></div>
                 <p>{segment.description && <><strong>{segment.description} </strong></>}{segment.feedback}</p>
+                {comboStepGoalChecks[index] && <GoalResultInline check={comboStepGoalChecks[index]} language={language} />}
                 <div className="timeline-edit"><label>Start (sec)<input type="number" min="0" max={activeSession.combo?.duration ?? 0} step="0.1" value={segment.start.toFixed(1)} onChange={(event) => updateComboSegment(segment.stepId, { start: Math.min(segment.end, Math.max(0, Number(event.target.value) || 0)), confirmed: true })} /></label><label>End (sec)<input type="number" min={segment.start} max={activeSession.combo?.duration ?? 0} step="0.1" value={segment.end.toFixed(1)} onChange={(event) => updateComboSegment(segment.stepId, { end: Math.min(activeSession.combo?.duration ?? 0, Math.max(segment.start, Number(event.target.value) || 0)), confirmed: true })} /></label><label className="timeline-confirm"><input type="checkbox" checked={segment.confirmed} onChange={(event) => updateComboSegment(segment.stepId, { confirmed: event.target.checked })} /> I confirm this segment</label></div>
               </div>)}</div>
             </section>}
