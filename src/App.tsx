@@ -1146,66 +1146,61 @@ function App() {
 
         {screen === 'home' && (
           <section className="page-content">
-            <section className="camera-hero panel">
-              <div className="camera-hero-copy">
-                <div className="eyebrow"><span className="live-dot" /> CAMERA-POWERED SKILL ANALYSIS</div>
-                <h1>Make every rep <em>visible.</em></h1>
-                <p className="lede">Turn your camera into a movement coach. Track body lines, movement phases and holds — with analysis that stays on your device.</p>
-                <div className="welcome-actions">
-                  <button className="button-primary welcome-action" onClick={() => setScreen('select')}><Video size={17} /> Start camera analysis <ArrowRight size={16} /></button>
-                  <button className="button-secondary welcome-action" onClick={() => startFreestyle()}><Sparkles size={17} /> Freestyle</button>
-                </div>
-                <div className="camera-privacy-note"><ShieldCheck size={15} /> Analysis runs locally on this device</div>
+            <section className="panel hero-panel">
+              <div>
+                <div className="eyebrow">MOVEMENT ANALYSIS</div>
+                <h1>Train with clarity.</h1>
+                <p className="lede">Choose a skill, record a set, and review the result without extra noise.</p>
               </div>
-              <div className="analysis-visual" aria-hidden="true">
-                <div className="analysis-visual-heading"><span><span className="analysis-pulse" /> CAMERA ANALYSIS</span><small>PREVIEW</small></div>
-                <div className="analysis-frame">
-                  <span className="frame-corner corner-top-left" /><span className="frame-corner corner-top-right" />
-                  <span className="frame-corner corner-bottom-left" /><span className="frame-corner corner-bottom-right" />
-                  <div className="analysis-grid-lines" />
-                  <svg className="pose-illustration" viewBox="0 0 220 220" fill="none">
-                    <path className="pose-limb" d="M111 53 111 97 111 137M111 72 81 91 60 119M111 72 143 91 164 118M111 137 86 166 66 191M111 137 137 164 157 190" />
-                    <path className="pose-guide" d="M41 196h138M110 35v164" />
-                    <circle className="pose-joint" cx="111" cy="48" r="10" />
-                    <circle className="pose-joint" cx="111" cy="72" r="4" /><circle className="pose-joint" cx="81" cy="91" r="4" />
-                    <circle className="pose-joint" cx="60" cy="119" r="4" /><circle className="pose-joint" cx="143" cy="91" r="4" />
-                    <circle className="pose-joint" cx="164" cy="118" r="4" /><circle className="pose-joint" cx="111" cy="97" r="4" />
-                    <circle className="pose-joint" cx="111" cy="137" r="4" /><circle className="pose-joint" cx="86" cy="166" r="4" />
-                    <circle className="pose-joint" cx="66" cy="191" r="4" /><circle className="pose-joint" cx="137" cy="164" r="4" />
-                    <circle className="pose-joint" cx="157" cy="190" r="4" />
-                  </svg>
-                  <span className="visual-tag tag-pose"><Activity size={12} /> POSE LANDMARKS</span>
-                  <span className="visual-tag tag-line"><span className="tag-line-mark" /> BODY LINE</span>
-                  <span className="analysis-frame-caption">Illustrative pose tracking preview</span>
-                </div>
+              <div className="welcome-actions">
+                <button className="button-primary welcome-action" onClick={() => setScreen('select')}><Video size={17} /> Analyze now</button>
+                <button className="button-secondary welcome-action" onClick={() => startFreestyle()}><Sparkles size={17} /> Freestyle</button>
               </div>
             </section>
+
             <div className="stat-grid">
               <StatCard label="Sessions logged" value={String(sessions.length).padStart(2, '0')} note="On this device" icon={<Dumbbell size={18} />} />
-              <StatCard label="Best technique score" value={bestScore ? `${bestScore}` : '—'} suffix={bestScore ? '/ 100' : ''} note={bestScore ? 'Across analyzed sessions' : 'Complete your first analysis'} icon={<Sparkles size={18} />} />
-              <StatCard label="Longest valid hold" value={bestHold ? formatTime(bestHold) : '—'} note="Personal best · technique-qualified" icon={<Clock3 size={18} />} />
+              <StatCard label="Best score" value={bestScore ? `${bestScore}` : '—'} suffix={bestScore ? '/ 100' : ''} note={bestScore ? 'Best recorded session' : 'No score yet'} icon={<Sparkles size={18} />} />
+              <StatCard label="Longest hold" value={bestHold ? formatTime(bestHold) : '—'} note="Technique-qualified" icon={<Clock3 size={18} />} />
             </div>
+
             <div className="home-grid">
               <section className="panel progress-panel">
-                <div className="panel-heading"><div><div className="eyebrow">YOUR JOURNEY</div><h2>Recent sessions</h2></div><button className="text-button" onClick={showHistory}>View all <ArrowRight size={15} /></button></div>
-                {recentSessions.length ? <div className="session-list">
-                  {recentSessions.map((session) => <SessionRow key={session.id} session={session} language={language} onClick={() => openSession(session)} />)}
-                </div> : <EmptyState title="Your training starts here" text="Run your first skill analysis to build a personal progress timeline." action="Choose a skill" onClick={() => setScreen('select')} />}
-                {sessions.some((session) => session.report.score !== null) && <ScoreTrend sessions={sessions} language={language} />}
-              </section>
-              <section className="panel camera-checks-panel">
-                <div className="eyebrow">YOUR CAMERA, CLEARER CUES</div>
-                <h2>What the analysis looks for</h2>
-                <div className="camera-check-list">
-                  <div><span>01</span><div><strong>Body alignment</strong><small>See how your body line holds up</small></div><Activity size={17} /></div>
-                  <div><span>02</span><div><strong>Movement phases</strong><small>Review the shape of each rep</small></div><Video size={17} /></div>
-                  <div><span>03</span><div><strong>Holds &amp; control</strong><small>Track technique-qualified hold time</small></div><Clock3 size={17} /></div>
+                <div className="panel-heading">
+                  <div>
+                    <div className="eyebrow">RECENT</div>
+                    <h2>Last sessions</h2>
+                  </div>
+                  <button className="text-button" onClick={showHistory}>Open log <ArrowRight size={15} /></button>
                 </div>
-                <button className="spotlight-link" onClick={() => setScreen('select')}>Explore skill library <ArrowRight size={16} /></button>
+                {recentSessions.length ? (
+                  <div className="session-list">
+                    {recentSessions.map((session) => <SessionRow key={session.id} session={session} language={language} onClick={() => openSession(session)} />)}
+                  </div>
+                ) : (
+                  <EmptyState title="Your training starts here" text="Run your first analysis to build a log." action="Choose a skill" onClick={() => setScreen('select')} />
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="eyebrow">START</div>
+                <h2>Quick actions</h2>
+                <div className="camera-check-list">
+                  <button className="quick-action-row" onClick={() => setScreen('select')}>
+                    <span>Choose a skill</span>
+                    <ArrowRight size={16} />
+                  </button>
+                  <button className="quick-action-row" onClick={() => startFreestyle()}>
+                    <span>Freestyle</span>
+                    <ArrowRight size={16} />
+                  </button>
+                  <button className="quick-action-row" onClick={() => setScreen('plan')}>
+                    <span>Training plan</span>
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
               </section>
             </div>
-            <div className="section-heading"><div><div className="eyebrow">PICK UP WHERE YOU LEFT OFF</div><h2>Explore progressions</h2></div><button className="text-button" onClick={() => setScreen('select')}>All skills <ArrowRight size={15} /></button></div>
-            <div className="quick-skills">{skills.slice(0, 4).map((skill, index) => <button className="quick-skill" key={skill.id} onClick={() => chooseSkill(skill)}><span className={`skill-number n-${index + 1}`}>0{index + 1}</span><span><strong>{skill.name}</strong><small>{skill.categoryName} · Level {skill.level}</small></span><ArrowRight size={16} /></button>)}</div>
           </section>
         )}
 

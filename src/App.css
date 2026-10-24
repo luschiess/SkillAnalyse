@@ -56,6 +56,11 @@ h1 em, .spotlight-panel h2 em { color: var(--green); font-style: normal; }
 .camera-hero .lede { max-width: 480px; color: #a5b0b7; font-size: 12px; }
 .camera-hero .welcome-actions { margin-top: 21px; }
 .camera-hero .button-primary { box-shadow: 0 5px 22px #72adff27; }
+.hero-panel { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 28px 30px; background: linear-gradient(180deg, #1a1f1b, #171a17); border: 1px solid #2c372d; }
+.hero-panel h1 { margin: 12px 0 8px; font-size: clamp(28px, 3vw, 40px); letter-spacing: -1.5px; }
+.hero-panel .lede { max-width: 460px; }
+.quick-action-row { width: 100%; min-height: 48px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 8px; color: #dfe7df; background: #181d1a; border: 1px solid #2a332d; text-align: left; }
+.quick-action-row:hover { border-color: #4d6588; background: #1a2128; }
 .camera-privacy-note { margin-top: 16px; display: flex; align-items: center; gap: 7px; color: #899a9c; font-size: 9px; }
 .camera-privacy-note svg { color: var(--green); }
 .analysis-visual { position: relative; z-index: 1; width: min(100%, 360px); justify-self: end; }
