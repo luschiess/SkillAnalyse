@@ -1124,7 +1124,7 @@ function App() {
             <section className="panel hero-panel">
               <div>
                 <div className="eyebrow">MOVEMENT ANALYSIS</div>
-                <h1>Train with clarity.</h1>
+                <h1>Train with <em>clarity.</em></h1>
                 <p className="lede">Choose a skill, record a set, and review the result without extra noise.</p>
               </div>
               <div className="welcome-actions">
