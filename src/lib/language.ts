@@ -1,7 +1,7 @@
 export type Language = 'en' | 'de'
 
 const german: Record<string, string> = {
-  'Overview': 'Übersicht', 'Analyze skill': 'Skill analysieren', 'Freestyle': 'Freestyle', 'Training log': 'Trainingsverlauf', 'Training plan': 'Trainingsplan',
+  'Overview': 'Übersicht', 'Analyze skill': 'Skill analysieren', 'Combo builder': 'Combo-Builder', 'Freestyle': 'Freestyle', 'Training log': 'Trainingsverlauf', 'Training plan': 'Trainingsplan',
   'WORKSPACE': 'ARBEITSBEREICH', 'Your data stays yours': 'Deine Daten bleiben bei dir', 'Analysis runs on this device.': 'Die Analyse läuft auf diesem Gerät.',
   'Athlete': 'Athlet:in', 'Personal workspace': 'Persönlicher Bereich', 'TRAINING': 'TRAINING',
   'Skill library': 'Skill-Bibliothek', 'New analysis': 'Neue Analyse', 'Session report': 'Trainingsbericht',
@@ -83,7 +83,9 @@ const german: Record<string, string> = {
   'PICK UP WHERE YOU LEFT OFF': 'MACH WEITER, WO DU WARST', 'Explore progressions': 'Progressionen entdecken', 'All skills': 'Alle Skills',
   'BUILD YOUR SESSION': 'STELLE DEIN TRAINING ZUSAMMEN', 'Choose your': 'Wähle deinen', 'skill.': 'Skill.',
   'Select a specific progression before recording. Each skill has its own movement checks.': 'Wähle vor der Aufnahme eine Progression aus. Jeder Skill hat eigene Bewegungskriterien.',
-  'HANDSTAND COMBO ANALYZER': 'HANDSTAND-COMBO-ANALYSE', 'Build a flowing sequence': 'Stelle eine flüssige Abfolge zusammen',
+  'HANDSTAND COMBO ANALYZER': 'HANDSTAND-COMBO-ANALYSE', 'COMBO BUILDER': 'COMBO-BUILDER', 'Build a flowing sequence': 'Stelle eine flüssige Abfolge zusammen',
+  'Create, organize and analyze your own combos in one place.': 'Erstelle, organisiere und analysiere deine Combos an einem Ort.',
+  'Open combo builder': 'Combo-Builder öffnen',
   'Close editor': 'Editor schließen', 'Edit combo': 'Combo bearbeiten',
   'Arrange press entries, handstand holds and handstand push-ups. Pose-based transitions are estimates and can be reviewed after recording.': 'Ordne Press-Einstiege, Handstand-Holds und Handstand-Liegestütze. Übergänge aus der Pose-Erkennung sind Schätzungen und können nach der Aufnahme geprüft werden.',
   'Element': 'Element', 'Type': 'Typ', 'Reps': 'Wiederholungen', 'Hold (sec)': 'Halten (Sek.)', 'Description (optional)': 'Beschreibung (optional)',

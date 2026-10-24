@@ -2,7 +2,7 @@ import { Children, cloneElement, isValidElement, useCallback, useEffect, useMemo
 import type { ReactNode } from 'react'
 import {
   Activity, ArrowDownRight, ArrowRight, Check, ChevronDown, CircleAlert, Clock3,
-  Download, Dumbbell, History, Play, Plus, RotateCcw, Search, ShieldCheck, Smartphone, Sparkles,
+  Download, Dumbbell, History, Layers, Play, Plus, RotateCcw, Search, ShieldCheck, Smartphone, Sparkles,
   Square, Trash2, Upload, Video, X,
 } from 'lucide-react'
 import type { PoseLandmarker } from '@mediapipe/tasks-vision'
@@ -21,7 +21,7 @@ import { LUSCHIES_SKILL_ID } from './types'
 import type { AnalysisReport, ComboStep, ComboStepKind, FreestyleSegment, FreestyleSkillKind, LiveMetrics, PosePoint, Skill, TrainingSession } from './types'
 import './App.css'
 
-type Screen = 'home' | 'select' | 'skill-detail' | 'session' | 'report' | 'history' | 'plan'
+type Screen = 'home' | 'select' | 'combos' | 'skill-detail' | 'session' | 'report' | 'history' | 'plan'
 type MediaMode = 'camera' | 'upload'
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -124,16 +124,12 @@ const loadStringList = (key: string, description: string) => {
 const navItems = [
   { id: 'home' as const, label: 'Overview', icon: Activity },
   { id: 'select' as const, label: 'Analyze skill', icon: Plus },
+  { id: 'combos' as const, label: 'Combo builder', icon: Layers },
   { id: 'freestyle' as const, label: 'Freestyle', icon: Sparkles },
   { id: 'history' as const, label: 'Training log', icon: History },
   { id: 'plan' as const, label: 'Training plan', icon: Dumbbell },
 ]
 const skeletonLinks = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]]
-const initialComboSteps: ComboStep[] = [
-  { id: 'combo-press', kind: 'press', name: 'Press to handstand', repetitions: 1, holdSeconds: 0, description: '' },
-  { id: 'combo-hold', kind: 'hold', name: 'Handstand hold', repetitions: 1, holdSeconds: 5, description: '' },
-  { id: 'combo-hspu', kind: 'hspu', name: 'Handstand Push-ups', repetitions: 2, holdSeconds: 0, description: '' },
-]
 const comboKindNames: Record<ComboStepKind, string> = { press: 'Press-to-handstand', hold: 'Handstand hold', hspu: 'Handstand push-ups', 'elbow-lever-to-handstand': 'Elbow Lever to Handstand', manual: 'Manual review' }
 const freestyleLabels: Array<{ kind: FreestyleSkillKind; label: string }> = [
   { kind: 'handstand', label: 'Handstand hold' },
@@ -196,10 +192,9 @@ function App() {
   const [favoriteSkills, setFavoriteSkills] = useState<string[]>(() => loadStringList('skillanalyse-favorite-skills', 'favorite skills'))
   const [recentSkillIds, setRecentSkillIds] = useState<string[]>(() => loadStringList('skillanalyse-recent-skills', 'recent skill IDs'))
   const [query, setQuery] = useState('')
-  const [comboEditorOpen, setComboEditorOpen] = useState(false)
   const [comboMode, setComboMode] = useState(false)
   const [comboName, setComboName] = useState('')
-  const [comboSteps, setComboSteps] = useState<ComboStep[]>(initialComboSteps)
+  const [comboSteps, setComboSteps] = useState<ComboStep[]>([])
   const [freestyleMode, setFreestyleMode] = useState(false)
   const [targetReps, setTargetReps] = useState(5)
   const [targetHold, setTargetHold] = useState(20)
@@ -373,7 +368,6 @@ function App() {
     setSelectedSkill(skill)
     setFreestyleMode(false)
     setComboMode(false)
-    setComboEditorOpen(false)
     setMeasureHold(skill.id === LUSCHIES_SKILL_ID || skill.type !== 'dynamic')
     if (skill.id === LUSCHIES_SKILL_ID) setTargetReps(1)
     setScreen('skill-detail')
@@ -766,7 +760,6 @@ function App() {
     setSelectedSkill(null)
     setFreestyleMode(false)
     setComboMode(false)
-    setComboEditorOpen(false)
     setActiveSession(null)
     setUploadedVideo(null)
     setScreen('select')
@@ -776,23 +769,6 @@ function App() {
   const openSession = (session: TrainingSession) => {
     setActiveSession(session)
     setScreen('report')
-  }
-
-  const startComboAnalysis = () => {
-    if (!comboSteps.length) return
-    const handstandSkill = skills.find((skill) => skill.name === 'Handstand')
-    if (!handstandSkill) {
-      setError('The handstand analyzer is not available in the skill library.')
-      return
-    }
-    setSelectedSkill(handstandSkill)
-    setComboName('Custom handstand combo')
-    setFreestyleMode(false)
-    setComboMode(true)
-    setComboEditorOpen(false)
-    setUploadedVideo(null)
-    setMediaMode('camera')
-    setScreen('session')
   }
 
   const startComboCameraAnalysis = (name: string, steps: ComboStep[]) => {
@@ -808,7 +784,6 @@ function App() {
     setSelectedSkill(handstandSkill)
     setFreestyleMode(false)
     setComboMode(true)
-    setComboEditorOpen(false)
     setUploadedVideo(null)
     setMediaMode('camera')
     setScreen('session')
@@ -1129,7 +1104,7 @@ function App() {
       <main className="main-area">
         <LocalizedContent language={language}>
         <header className="topbar">
-          <div className="breadcrumb"><span>{t('TRAINING')}</span><span className="crumb-slash">/</span><strong>{t(freestyleMode && screen === 'session' ? 'Freestyle' : screen === 'home' ? 'Overview' : screen === 'select' || screen === 'skill-detail' ? 'Skill library' : screen === 'session' ? 'New analysis' : screen === 'report' ? 'Session report' : screen === 'plan' ? 'Training plan' : 'Training log')}</strong></div>
+          <div className="breadcrumb"><span>{t('TRAINING')}</span><span className="crumb-slash">/</span><strong>{t(freestyleMode && screen === 'session' ? 'Freestyle' : screen === 'home' ? 'Overview' : screen === 'select' || screen === 'skill-detail' ? 'Skill library' : screen === 'combos' ? 'Combo builder' : screen === 'session' ? 'New analysis' : screen === 'report' ? 'Session report' : screen === 'plan' ? 'Training plan' : 'Training log')}</strong></div>
           <div className="topbar-actions">
             <label className="language-switch"><span>{t('Language')}</span><select aria-label={t('Select language')} value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option value="en">English</option><option value="de">Deutsch</option></select></label>
             {!appInstalled && <button className="topbar-cta install-action" onClick={() => void installApp()} aria-label={t(installPrompt ? 'Install CaliTracker' : 'Show installation instructions')}><Download size={15} /><span>{t(installPrompt ? 'Install app' : 'Install')}</span></button>}
@@ -1207,54 +1182,10 @@ function App() {
         {screen === 'select' && (
           <section className="page-content">
             <div className="page-heading"><div><div className="eyebrow">BUILD YOUR SESSION</div><h1>Choose your <em>skill.</em></h1><p className="lede">Select a specific progression before recording. Each skill has its own movement checks.</p></div></div>
-            <section className="combo-builder panel">
-              <div className="panel-heading"><div><div className="eyebrow">HANDSTAND COMBO ANALYZER</div><h2>Build a flowing sequence</h2></div><button className="button-secondary" onClick={() => setComboEditorOpen((open) => !open)}>{comboEditorOpen ? 'Close editor' : 'Edit combo'}</button></div>
-              <p className="combo-intro">Arrange press entries, Elbow Lever to Handstand transitions, handstand holds and handstand push-ups. Pose-based transitions are estimates and can be reviewed after recording.</p>
-              {comboEditorOpen && <div className="combo-step-list">
-                {comboSteps.map((step, index) => {
-                  const options = skills.filter((skill) => step.kind === 'elbow-lever-to-handstand'
-                    ? skill.name === 'Elbow Lever to Handstand'
-                    : step.kind === 'press'
-                    ? skill.category === 'bent-arm-press' || skill.name === 'Handstand Kick-Up' || skill.name.includes('Press to Handstand') || skill.id === LUSCHIES_SKILL_ID
-                    : step.kind === 'hold'
-                      ? skill.category === 'handstand' && skill.type !== 'dynamic'
-                      : skill.category === 'handstand-push-up')
-                  return <div className="combo-step-editor panel" key={step.id}>
-                    <div className="combo-step-number">{String(index + 1).padStart(2, '0')}</div>
-                    <div className="combo-step-fields">
-                      <label>Element<select value={step.name} onChange={(event) => {
-                        const selectedName = event.target.value
-                        const selectedSkill = skills.find((skill) => skill.name === selectedName)
-                        const kind: ComboStepKind | undefined = selectedSkill?.name === 'Elbow Lever to Handstand'
-                          ? 'elbow-lever-to-handstand'
-                          : selectedSkill && (selectedSkill.category === 'bent-arm-press' || selectedSkill.id === LUSCHIES_SKILL_ID)
-                            ? 'press'
-                            : selectedSkill?.category === 'handstand-push-up'
-                              ? 'hspu'
-                              : selectedSkill?.category === 'handstand' && selectedSkill.type !== 'dynamic' ? 'hold' : undefined
-                        setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, name: selectedName, ...(kind ? { kind } : {}) } : item))
-                      }}>
-                        <option value={step.name}>{step.name}</option>
-                        {options.filter((option) => option.name !== step.name).map((option) => <option key={option.id} value={option.name}>{option.name}</option>)}
-                      </select></label>
-                      <label>Type<select value={step.kind} onChange={(event) => {
-                        const kind = event.target.value as ComboStepKind
-                        setComboSteps((previous) => previous.map((item) => item.id === step.id ? {
-                          ...item, kind, name: kind === 'press' ? 'Press to handstand' : kind === 'hold' ? 'Handstand hold' : kind === 'manual' ? 'Manual review' : kind === 'elbow-lever-to-handstand' ? 'Elbow Lever to Handstand' : 'Handstand Push-ups',
-                        } : item))
-                      }}><option value="press">Press to handstand</option><option value="hold">Handstand hold</option><option value="hspu">Handstand push-ups</option><option value="elbow-lever-to-handstand">Elbow Lever to Handstand</option></select></label>
-                      <label>Reps<input aria-label={`Repetitions for step ${index + 1}`} type="number" min="1" max="50" value={step.repetitions} onChange={(event) => setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, repetitions: Math.max(1, Math.min(50, Number(event.target.value) || 1)) } : item))} /></label>
-                      <label>Hold (sec)<input aria-label={`Hold time for step ${index + 1}`} type="number" min="0" max="300" value={step.holdSeconds} onChange={(event) => setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, holdSeconds: Math.max(0, Math.min(300, Number(event.target.value) || 0)) } : item))} /></label>
-                      <label className="combo-description">Description (optional)<input value={step.description} maxLength={120} placeholder="Short cue for this element" onChange={(event) => setComboSteps((previous) => previous.map((item) => item.id === step.id ? { ...item, description: event.target.value } : item))} /></label>
-                    </div>
-                    <div className="combo-step-actions"><button className="icon-button" aria-label={`Move step ${index + 1} up`} disabled={index === 0} onClick={() => setComboSteps((previous) => { const next = [...previous]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next })}>↑</button><button className="icon-button" aria-label={`Move step ${index + 1} down`} disabled={index === comboSteps.length - 1} onClick={() => setComboSteps((previous) => { const next = [...previous]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; return next })}>↓</button><button className="icon-button" aria-label={`Remove step ${index + 1}`} disabled={comboSteps.length <= 1} onClick={() => setComboSteps((previous) => previous.filter((item) => item.id !== step.id))}><X size={15} /></button></div>
-                  </div>
-                })}
-                <div className="combo-editor-footer"><button className="button-secondary" onClick={() => setComboSteps((previous) => [...previous, { id: crypto.randomUUID(), kind: 'hold', name: 'Handstand hold', repetitions: 1, holdSeconds: 5, description: '' }])}><Plus size={15} /> Add element</button><button className="button-primary" onClick={startComboAnalysis} disabled={comboSteps.length === 0}><Activity size={15} /> Analyze this combo</button></div>
-              </div>}
-              {!comboEditorOpen && <div className="combo-preview">{comboSteps.map((step, index) => <span key={step.id}><b>{index + 1}</b>{step.name} · {step.repetitions} rep{step.repetitions === 1 ? '' : 's'}{step.holdSeconds > 0 ? ` · ${step.holdSeconds}s` : ''}</span>)}</div>}
+            <section className="combo-builder panel combo-builder-shortcut">
+              <div className="panel-heading"><div><div className="eyebrow">{t('COMBO BUILDER')}</div><h2>{t('Build a flowing sequence')}</h2></div><button className="button-primary" onClick={() => navigateTo('combos')}><Layers size={15} /> {t('Open combo builder')}</button></div>
+              <p className="combo-intro">{t('Create, organize and analyze your own combos in one place.')}</p>
             </section>
-            <ComboLibrary language={language} onFreestyle={startFreestyle} onAnalyzeCombo={startComboCameraAnalysis} />
             <div className="library-tools"><label className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search skills…" aria-label="Search skills" />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}</label>
               <label className="difficulty-filter"><span>DIFFICULTY</span><select aria-label="Filter by difficulty" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}><option value="all">All levels</option><option value="beginner">Beginner · 1–2</option><option value="intermediate">Intermediate · 3</option><option value="advanced">Advanced · 4–5</option></select></label>
               <label className="difficulty-filter"><span>{t('EQUIPMENT')}</span><select aria-label={t('Filter by equipment')} value={equipment} onChange={(event) => setEquipment(event.target.value)}><option value="all">{t('All equipment')}</option>{[...new Set(skills.flatMap((skill) => skill.equipment))].sort().map((item) => <option key={item} value={item}>{t(item)}</option>)}</select></label>
@@ -1271,6 +1202,13 @@ function App() {
               </div></div>
             })}
             {filteredSkills.length === 0 && <EmptyState title="No matching skills" text="Try a different search term, category or difficulty." action="Clear filters" onClick={() => { setQuery(''); setCategory('all'); setDifficulty('all') }} />}
+          </section>
+        )}
+
+        {screen === 'combos' && (
+          <section className="page-content combo-builder-page">
+            <div className="page-heading"><div><div className="eyebrow">{t('COMBO BUILDER')}</div><h1>{t('Build a flowing sequence')}</h1><p className="lede">{t('Create, organize and analyze your own combos in one place.')}</p></div></div>
+            <ComboLibrary language={language} onFreestyle={startFreestyle} onAnalyzeCombo={startComboCameraAnalysis} />
           </section>
         )}
 

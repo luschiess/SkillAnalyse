@@ -762,3 +762,243 @@ h1 em, .spotlight-panel h2 em { color: var(--green); font-style: normal; }
   .timeline-edit select { min-width: 0; width: 100%; }
   .timeline-edit .timeline-confirm { margin: 5px 0 0; }
 }
+
+/* Calm down the overall surface and give each section more room to breathe. */
+:root {
+  --bg: #0d1110;
+  --panel: #141a17;
+  --panel-raised: #19211d;
+  --line: #28332d;
+  --muted: #99a49a;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 72% -18%, #20334b3b, transparent 42%),
+    var(--bg);
+}
+
+.app-shell { background: transparent; }
+.sidebar { width: 228px; background: #111714ed; border-color: #202a24; }
+.sidebar-label { margin-top: 40px; }
+.side-nav { gap: 7px; }
+.nav-item { height: 46px; border-radius: 10px; }
+.nav-item.active { background: #1b2a37; }
+.main-area { margin-left: 228px; padding-inline: clamp(24px, 4.4vw, 68px); }
+.topbar { border-color: #202a24; }
+.page-content { width: min(1080px, 100%); padding-top: 48px; }
+.page-heading { margin-bottom: 32px; }
+.panel { border-color: #26312b; border-radius: 13px; background-color: #141a17; }
+.panel-heading h2, .section-heading h2 { letter-spacing: -.25px; }
+.hero-panel {
+  min-height: 190px;
+  padding: 34px;
+  border-color: #2b3a3b;
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse at 90% 10%, #40689124, transparent 45%),
+    linear-gradient(125deg, #18221e, #141a17 68%);
+}
+.hero-panel .lede { line-height: 1.9; }
+.stat-grid { gap: 15px; margin: 18px 0 24px; }
+.stat-card { min-height: 112px; padding: 17px 19px; }
+.home-grid { gap: 16px; }
+.progress-panel, .home-grid > .panel { padding: 22px; }
+.progress-panel { min-height: 260px; }
+.home-grid > .panel > .eyebrow { margin-bottom: 7px; }
+.camera-check-list { gap: 5px; margin-top: 15px; }
+.quick-action-row {
+  min-height: 50px;
+  padding-inline: 4px;
+  border: 0;
+  border-top: 1px solid #29332d;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
+}
+.quick-action-row:hover { padding-inline: 9px; background: #1a211e; }
+.app-footer { border-color: #202a24; }
+.skill-grid { gap: 13px; }
+.skill-card {
+  min-height: 178px;
+  padding: 16px;
+  border: 1px solid #29342e;
+  border-radius: 12px;
+  background: #141a17;
+}
+.skill-card:hover { border-color: #45617a; background: #18211e; }
+.skill-card h3 { font-size: 13px; line-height: 1.4; }
+.skill-card > p { font-size: 10px; }
+.skill-group { margin-bottom: 32px; }
+.combo-library { padding: 22px; border-radius: 14px; }
+.combo-builder-page > .page-heading { margin-bottom: 26px; }
+.combo-skill-browser, .combo-draft-editor { padding: 18px; border-radius: 12px; }
+.combo-draft { padding: 17px; }
+.combo-step-list { gap: 10px; }
+.combo-step-editor, .combo-skill-option, .combo-template-card, .saved-combo-row {
+  border-color: #2b3832;
+  border-radius: 10px;
+}
+
+@media (max-width: 800px) {
+  .sidebar { width: 66px; }
+  .main-area { margin-left: 66px; padding-inline: 24px; }
+}
+
+@media (max-width: 560px) {
+  .sidebar { width: 100%; }
+  .side-nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .nav-item { gap: 4px; }
+  .nav-item > span { font-size: 7px; }
+  .main-area { margin-left: 0; padding-inline: 16px; }
+  .page-content { padding-top: 31px; }
+  .page-heading { margin-bottom: 24px; }
+  .hero-panel { min-height: 0; padding: 24px 19px; border-radius: 14px; }
+  .hero-panel .welcome-actions { flex-direction: row; }
+  .hero-panel .welcome-action { width: auto; }
+  .stat-grid { gap: 8px; margin: 12px 0 17px; }
+  .progress-panel, .home-grid > .panel { padding: 17px; }
+  .skill-grid { gap: 9px; }
+  .skill-card { min-height: 158px; padding: 12px; }
+  .combo-library { padding: 15px; }
+  .combo-skill-browser, .combo-draft-editor { padding: 13px; }
+}
+
+/* A more distinctive, calmer visual language across the app. */
+:root {
+  --green: #b9f27c;
+  --green-dark: #8bc94c;
+  --bg: #0d1110;
+  --panel: #151a17;
+  --panel-raised: #1b211d;
+  --line: #303a32;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 12% 0%, #31452c24, transparent 32%),
+    radial-gradient(ellipse at 90% 15%, #24402b1c, transparent 28%),
+    var(--bg);
+}
+
+.sidebar { background: #101512f5; }
+.brand-mark { border-radius: 11px; box-shadow: 0 0 24px #b9f27c26; }
+.nav-item { color: #a0aaa0; }
+.nav-item:hover { background: #1a211c; }
+.nav-item.active {
+  color: #d2ff9e;
+  background: linear-gradient(100deg, #273523, #1b241d);
+  box-shadow: inset 2px 0 #b9f27c;
+}
+.privacy-card { color: #b9f27c; border-color: #33422d; background: #192119; }
+.avatar { color: #d2ff9e; background: #2a3824; }
+.topbar-cta { color: #c4f38d; border-color: #354433; }
+.topbar-cta:hover { background: #202b1f; border-color: #779754; }
+.button-primary {
+  color: #172011;
+  background: linear-gradient(135deg, #cef99e, #aee96c);
+  box-shadow: 0 5px 18px #b9f27c18;
+}
+.button-primary:hover { background: #d8ffad; }
+.button-secondary { border-color: #384139; background: #202621; }
+.button-secondary:hover { border-color: #7a945d; background: #252f24; }
+
+.hero-panel {
+  position: relative;
+  isolation: isolate;
+  min-height: 226px;
+  overflow: hidden;
+  padding: 40px 42px;
+  border: 1px solid #d0ff9c;
+  background:
+    radial-gradient(ellipse at 85% 5%, #ffffff64, transparent 34%),
+    linear-gradient(115deg, #c8f59b, #9bdc7d);
+  box-shadow: 0 22px 65px #a9ea7620;
+}
+.hero-panel::after {
+  position: absolute;
+  z-index: -1;
+  right: -54px;
+  bottom: -112px;
+  width: 330px;
+  height: 250px;
+  content: "";
+  border: 1px solid #17240f24;
+  border-radius: 50%;
+  box-shadow: 0 0 0 22px #17240f0b, 0 0 0 48px #17240f08;
+  transform: rotate(-28deg);
+}
+.hero-panel .eyebrow { color: #35492b; }
+.hero-panel h1 { color: #152014; font-size: clamp(36px, 4.4vw, 54px); letter-spacing: -2.5px; }
+.hero-panel .lede { max-width: 430px; color: #354632; font-size: 13px; }
+.hero-panel .button-primary { color: #eaffd7; background: #1a2919; box-shadow: none; }
+.hero-panel .button-primary:hover { color: #fff; background: #293d25; }
+.hero-panel .button-secondary { color: #263722; border-color: #58764a66; background: #ffffff38; }
+.hero-panel .button-secondary:hover { background: #ffffff70; }
+
+.stat-grid { gap: 12px; }
+.stat-card {
+  position: relative;
+  min-height: 118px;
+  overflow: hidden;
+  border-color: #303a32;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #171e19, #131815);
+}
+.stat-card::after {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  content: "";
+  background: #b9f27c;
+  opacity: .75;
+}
+.stat-icon { color: #c4f38d; background: #2a3825; }
+.home-grid > .panel { border-radius: 13px; background: #141a16; }
+.quick-action-row { color: #e2e9df; }
+.quick-action-row:hover { color: #d2ff9e; background: #1c251c; }
+.session-row-icon, .empty-icon { color: #c7f797; background: #2a3825; }
+.text-button, .spotlight-link { color: #c4f38d; }
+
+.search-field, .difficulty-filter select, .combo-filter-label select,
+.combo-custom-skill input, .combo-custom-skill select {
+  border-color: #374239;
+  background-color: #171d19;
+}
+.category-pills button { border-color: #354037; background: #151b17; }
+.category-pills button:hover { border-color: #7e9c5d; color: #e4f6d5; }
+.category-pills button.selected {
+  color: #192312;
+  border-color: #b9f27c;
+  background: #b9f27c;
+}
+.skill-type { color: #c7f797; background: #293623; }
+.skill-type.dynamic, .analysis-badge { color: #c3daac; background: #263123; }
+.skill-type.combined, .badge-manual { color: #e2c0e8; background: #302338; }
+.badge-automatic { color: #c7f797; background: #293623; }
+.skill-favorite.is-favorite, .skill-number { color: #c7f797; }
+.recent-skills button { color: #d5eac6; border-color: #364331; background: #1b241a; }
+.skill-card, .combo-library { background: #141a16; }
+.skill-card:hover { border-color: #718b55; background: #1b241a; }
+.combo-library { border-color: #303a32; }
+.combo-builder-summary { border-color: #364331; background: #192119; }
+.combo-builder-summary strong { color: #c7f797; }
+.combo-skill-browser, .combo-draft-editor { background: #171d19; }
+.combo-step-editor, .combo-skill-option, .combo-template-card, .saved-combo-row {
+  border-color: #344036;
+  background-color: #191f1a;
+}
+.combo-step-number, .combo-builder-preview li > span { color: #c7f797; }
+.combo-builder-tabs button.active { color: #e7f7d6; background: #2c3b27; }
+
+@media (max-width: 800px) {
+  .hero-panel { padding: 30px; }
+}
+@media (max-width: 560px) {
+  .hero-panel { min-height: 0; padding: 25px 20px; }
+  .hero-panel h1 { font-size: 38px; }
+  .hero-panel::after { right: -180px; }
+  .stat-card { min-height: 104px; }
+}
